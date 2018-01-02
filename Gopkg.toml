@@ -1,0 +1,44 @@
+required = ["github.com/revel/cmd/revel"]
+
+[[constraint]]
+  name = "github.com/cactus/go-statsd-client"
+
+[[constraint]]
+  name = "github.com/go-sql-driver/mysql"
+
+[[constraint]]
+  name = "github.com/hashicorp/go-version"
+
+[[constraint]]
+  name = "github.com/jmoiron/sqlx"
+
+[[constraint]]
+  name = "github.com/nu7hatch/gouuid"
+
+[[constraint]]
+  name = "github.com/percona/go-mysql"
+
+[[constraint]]
+  name = "github.com/percona/pmm"
+
+[[constraint]]
+  name = "github.com/pkg/errors"
+  version = "0.8.0"
+
+[[constraint]]
+  name = "github.com/revel/revel"
+
+[[constraint]]
+  name = "github.com/robfig/config"
+
+[[constraint]]
+  name = "github.com/stretchr/testify"
+
+[[constraint]]
+  name = "github.com/youtube/vitess"
+
+[[constraint]]
+  name = "golang.org/x/net"
+
+[[constraint]]
+  name = "gopkg.in/check.v1"
