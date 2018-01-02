@@ -1,18 +1,15 @@
-// Copyright (c) 2012-2016 The Revel Framework Authors, All rights reserved.
-// Revel Framework source code and usage is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package harness
 
 import (
+	"github.com/revel/revel"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/ioutil"
+	"log"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/revel/revel"
 )
 
 const validationKeysSource = `
@@ -80,7 +77,7 @@ func TestGetValidationKeys(t *testing.T) {
 	}
 
 	for i, decl := range file.Decls {
-		lineKeys := getValidationKeys(fset, decl.(*ast.FuncDecl), map[string]string{"revel": revel.RevelImportPath})
+		lineKeys := getValidationKeys(fset, decl.(*ast.FuncDecl), map[string]string{"revel": revel.REVEL_IMPORT_PATH})
 		for k, v := range expectedValidationKeys[i] {
 			if lineKeys[k] != v {
 				t.Errorf("Not found - %d: %v - Actual Map: %v", k, v, lineKeys)
@@ -94,18 +91,18 @@ func TestGetValidationKeys(t *testing.T) {
 }
 
 var TypeExprs = map[string]TypeExpr{
-	"int":        {"int", "", 0, true},
-	"*int":       {"*int", "", 1, true},
-	"[]int":      {"[]int", "", 2, true},
-	"...int":     {"[]int", "", 2, true},
-	"[]*int":     {"[]*int", "", 3, true},
-	"...*int":    {"[]*int", "", 3, true},
-	"MyType":     {"MyType", "pkg", 0, true},
-	"*MyType":    {"*MyType", "pkg", 1, true},
-	"[]MyType":   {"[]MyType", "pkg", 2, true},
-	"...MyType":  {"[]MyType", "pkg", 2, true},
-	"[]*MyType":  {"[]*MyType", "pkg", 3, true},
-	"...*MyType": {"[]*MyType", "pkg", 3, true},
+	"int":        TypeExpr{"int", "", 0, true},
+	"*int":       TypeExpr{"*int", "", 1, true},
+	"[]int":      TypeExpr{"[]int", "", 2, true},
+	"...int":     TypeExpr{"[]int", "", 2, true},
+	"[]*int":     TypeExpr{"[]*int", "", 3, true},
+	"...*int":    TypeExpr{"[]*int", "", 3, true},
+	"MyType":     TypeExpr{"MyType", "pkg", 0, true},
+	"*MyType":    TypeExpr{"*MyType", "pkg", 1, true},
+	"[]MyType":   TypeExpr{"[]MyType", "pkg", 2, true},
+	"...MyType":  TypeExpr{"[]MyType", "pkg", 2, true},
+	"[]*MyType":  TypeExpr{"[]*MyType", "pkg", 3, true},
+	"...*MyType": TypeExpr{"[]*MyType", "pkg", 3, true},
 }
 
 func TestTypeExpr(t *testing.T) {
@@ -128,10 +125,10 @@ func TestTypeExpr(t *testing.T) {
 		}
 
 		if array {
-			expr = &ast.ArrayType{Lbrack: expr.Pos(), Len: nil, Elt: expr}
+			expr = &ast.ArrayType{expr.Pos(), nil, expr}
 		}
 		if ellipsis {
-			expr = &ast.Ellipsis{Ellipsis: expr.Pos(), Elt: expr}
+			expr = &ast.Ellipsis{expr.Pos(), expr}
 		}
 
 		actual := NewTypeExpr("pkg", expr)
@@ -142,17 +139,17 @@ func TestTypeExpr(t *testing.T) {
 }
 
 func TestProcessBookingSource(t *testing.T) {
-	revel.Init("prod", "github.com/revel/examples/booking", "")
+	revel.Init("prod", "github.com/revel/samples/booking", "")
 	sourceInfo, err := ProcessSource([]string{revel.AppPath})
 	if err != nil {
 		t.Fatal("Failed to process booking source with error:", err)
 	}
 
-	controllerPackage := "github.com/revel/examples/booking/app/controllers"
+	CONTROLLER_PKG := "github.com/revel/samples/booking/app/controllers"
 	expectedControllerSpecs := []*TypeInfo{
-		{"GorpController", controllerPackage, "controllers", nil, nil},
-		{"Application", controllerPackage, "controllers", nil, nil},
-		{"Hotels", controllerPackage, "controllers", nil, nil},
+		{"GorpController", CONTROLLER_PKG, "controllers", nil, nil},
+		{"Application", CONTROLLER_PKG, "controllers", nil, nil},
+		{"Hotels", CONTROLLER_PKG, "controllers", nil, nil},
 	}
 	if len(sourceInfo.ControllerSpecs()) != len(expectedControllerSpecs) {
 		t.Errorf("Unexpected number of controllers found.  Expected %d, Found %d",
@@ -180,8 +177,8 @@ NEXT_TEST:
 }
 
 func BenchmarkProcessBookingSource(b *testing.B) {
-	revel.Init("", "github.com/revel/examples/booking", "")
-	revel.GetRootLogHandler().Disable()
+	revel.Init("", "github.com/revel/samples/booking", "")
+	revel.TRACE = log.New(ioutil.Discard, "", 0)
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {

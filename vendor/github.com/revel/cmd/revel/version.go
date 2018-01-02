@@ -2,10 +2,6 @@
 // Revel Framework source code and usage is governed by a MIT style
 // license that can be found in the LICENSE file.
 
-// Copyright (c) 2012-2016 The Revel Framework Authors, All rights reserved.
-// Revel Framework source code and usage is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package main
 
 import (

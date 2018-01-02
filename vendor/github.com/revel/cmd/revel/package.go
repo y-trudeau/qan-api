@@ -1,7 +1,3 @@
-// Copyright (c) 2012-2016 The Revel Framework Authors, All rights reserved.
-// Revel Framework source code and usage is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package main
 
 import (
@@ -27,7 +23,7 @@ Run mode defaults to "dev".
 
 For example:
 
-    revel package github.com/revel/examples/chat
+    revel package github.com/revel/samples/chat
 `,
 }
 
@@ -42,7 +38,7 @@ func packageApp(args []string) {
 	}
 
 	// Determine the run mode.
-	mode := DefaultRunMode
+	mode := "dev"
 	if len(args) >= 2 {
 		mode = args[1]
 	}
@@ -52,9 +48,7 @@ func packageApp(args []string) {
 
 	// Remove the archive if it already exists.
 	destFile := filepath.Base(revel.BasePath) + ".tar.gz"
-	if err := os.Remove(destFile); err != nil && !os.IsNotExist(err) {
-		revel.RevelLog.Fatal("Unable to remove target file","error",err,"file",destFile)
-	}
+	os.Remove(destFile)
 
 	// Collect stuff in a temp directory.
 	tmpDir, err := ioutil.TempDir("", filepath.Base(revel.BasePath))

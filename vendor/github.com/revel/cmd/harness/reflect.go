@@ -1,7 +1,3 @@
-// Copyright (c) 2012-2016 The Revel Framework Authors, All rights reserved.
-// Revel Framework source code and usage is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package harness
 
 // This file handles the app code introspection.
@@ -13,12 +9,12 @@ import (
 	"go/parser"
 	"go/scanner"
 	"go/token"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/revel/revel"
-	"unicode"
 )
 
 // SourceInfo is the top-level struct containing all extracted information
@@ -29,7 +25,7 @@ type SourceInfo struct {
 	StructSpecs []*TypeInfo
 	// ValidationKeys provides a two-level lookup.  The keys are:
 	// 1. The fully-qualified function name,
-	//    e.g. "github.com/revel/examples/chat/app/controllers.(*Application).Action"
+	//    e.g. "github.com/revel/samples/chat/app/controllers.(*Application).Action"
 	// 2. Within that func's file, the line number of the (overall) expression statement.
 	//    e.g. the line returned from runtime.Caller()
 	// The result of the lookup the name of variable being validated.
@@ -48,7 +44,7 @@ type SourceInfo struct {
 // TypeInfo summarizes information about a struct type in the app source code.
 type TypeInfo struct {
 	StructName  string // e.g. "Application"
-	ImportPath  string // e.g. "github.com/revel/examples/chat/app/controllers"
+	ImportPath  string // e.g. "github.com/revel/samples/chat/app/controllers"
 	PackageName string // e.g. "controllers"
 	MethodSpecs []*MethodSpec
 
@@ -64,14 +60,12 @@ type methodCall struct {
 	Names []string
 }
 
-// MethodSpec holds the information of one Method
 type MethodSpec struct {
 	Name        string        // Name of the method, e.g. "Index"
 	Args        []*MethodArg  // Argument descriptors
 	RenderCalls []*methodCall // Descriptions of Render() invocations from this Method.
 }
 
-// MethodArg holds the information of one argument
 type MethodArg struct {
 	Name       string   // Name of the argument.
 	TypeExpr   TypeExpr // The name of the type, e.g. "int", "*pkg.UserType"
@@ -86,9 +80,8 @@ type embeddedTypeName struct {
 // receiver.
 type methodMap map[string][]*MethodSpec
 
-// ProcessSource parses the app controllers directory and
-// returns a list of the controller types found.
-// Otherwise CompileError if the parsing fails.
+// Parse the app controllers directory and return a list of the controller types found.
+// Returns a CompileError if the parsing fails.
 func ProcessSource(roots []string) (*SourceInfo, *revel.Error) {
 	var (
 		srcInfo      *SourceInfo
@@ -98,14 +91,14 @@ func ProcessSource(roots []string) (*SourceInfo, *revel.Error) {
 	for _, root := range roots {
 		rootImportPath := importPathFromPath(root)
 		if rootImportPath == "" {
-			revel.RevelLog.Warn("Skipping empty code path", "path", root)
+			revel.WARN.Println("Skipping code path", root)
 			continue
 		}
 
 		// Start walking the directory tree.
 		_ = revel.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				revel.RevelLog.Error("Error scanning app source:", "error", err)
+				log.Println("Error scanning app source:", err)
 				return nil
 			}
 
@@ -127,7 +120,7 @@ func ProcessSource(roots []string) (*SourceInfo, *revel.Error) {
 			}, 0)
 			if err != nil {
 				if errList, ok := err.(scanner.ErrorList); ok {
-					var pos = errList[0].Pos
+					var pos token.Position = errList[0].Pos
 					compileError = &revel.Error{
 						SourceType:  ".go source",
 						Title:       "Go Compilation Error",
@@ -146,10 +139,8 @@ func ProcessSource(roots []string) (*SourceInfo, *revel.Error) {
 
 					return compileError
 				}
-
-				// This is exception, err alredy checked above. Here just a print
 				ast.Print(nil, err)
-				revel.RevelLog.Fatal("Failed to parse dir", "error", err)
+				log.Fatalf("Failed to parse dir: %s", err)
 			}
 
 			// Skip "main" packages.
@@ -160,21 +151,9 @@ func ProcessSource(roots []string) (*SourceInfo, *revel.Error) {
 				return nil
 			}
 
-			// Ignore packages that end with _test
-			for i := range pkgs {
-				if len(i) > 6 {
-					if string(i[len(i)-5:]) == "_test" {
-						delete(pkgs, i)
-					}
-				}
-			}
-
 			// There should be only one package in this directory.
 			if len(pkgs) > 1 {
-				for i := range pkgs {
-					println("Found package ", i)
-				}
-				revel.RevelLog.Error("Most unexpected! Multiple packages in a single directory:", "packages", pkgs)
+				log.Println("Most unexpected! Multiple packages in a single directory:", pkgs)
 			}
 
 			var pkg *ast.Package
@@ -199,7 +178,7 @@ func appendSourceInfo(srcInfo1, srcInfo2 *SourceInfo) *SourceInfo {
 	srcInfo1.InitImportPaths = append(srcInfo1.InitImportPaths, srcInfo2.InitImportPaths...)
 	for k, v := range srcInfo2.ValidationKeys {
 		if _, ok := srcInfo1.ValidationKeys[k]; ok {
-			revel.RevelLog.Warn("Key conflict when scanning validation calls:", "key", k)
+			log.Println("Key conflict when scanning validation calls:", k)
 			continue
 		}
 		srcInfo1.ValidationKeys[k] = v
@@ -317,7 +296,7 @@ func addImports(imports map[string]string, decl ast.Decl, srcDir string) {
 				// We expect this to happen for apps using reverse routing (since we
 				// have not yet generated the routes).  Don't log that.
 				if !strings.HasSuffix(fullPath, "/app/routes") {
-					revel.RevelLog.Debug("Could not find import:", "path", fullPath)
+					revel.TRACE.Println("Could not find import:", fullPath)
 				}
 				continue
 			}
@@ -336,7 +315,6 @@ func appendStruct(specs []*TypeInfo, pkgImportPath string, pkg *ast.Package, dec
 	if !found {
 		return specs
 	}
-
 	structType := spec.Type.(*ast.StructType)
 
 	// At this point we know it's a type declaration for a struct.
@@ -396,7 +374,7 @@ func appendStruct(specs []*TypeInfo, pkgImportPath string, pkg *ast.Package, dec
 		} else {
 			var ok bool
 			if importPath, ok = imports[pkgName]; !ok {
-				revel.RevelLog.Error("Failed to find import path for ", "package", pkgName, "type", typeName)
+				log.Print("Failed to find import path for ", pkgName, ".", typeName)
 				continue
 			}
 		}
@@ -441,7 +419,7 @@ func appendAction(fset *token.FileSet, mm methodMap, decl ast.Decl, pkgImportPat
 	if selExpr.Sel.Name != "Result" {
 		return
 	}
-	if pkgIdent, ok := selExpr.X.(*ast.Ident); !ok || imports[pkgIdent.Name] != revel.RevelImportPath {
+	if pkgIdent, ok := selExpr.X.(*ast.Ident); !ok || imports[pkgIdent.Name] != revel.REVEL_IMPORT_PATH {
 		return
 	}
 
@@ -455,16 +433,13 @@ func appendAction(fset *token.FileSet, mm methodMap, decl ast.Decl, pkgImportPat
 			var importPath string
 			typeExpr := NewTypeExpr(pkgName, field.Type)
 			if !typeExpr.Valid {
-				revel.RevelLog.Warnf("Didn't understand argument '%s' of action %s. Ignoring.", name, getFuncName(funcDecl))
+				log.Printf("Didn't understand argument '%s' of action %s. Ignoring.\n", name, getFuncName(funcDecl))
 				return // We didn't understand one of the args.  Ignore this action.
 			}
-			// Local object
-			if typeExpr.PkgName == pkgName {
-				importPath = pkgImportPath
-			} else if typeExpr.PkgName != "" {
+			if typeExpr.PkgName != "" {
 				var ok bool
 				if importPath, ok = imports[typeExpr.PkgName]; !ok {
-					revel.RevelLog.Errorf("Failed to find import for arg of type: %s , %s", typeExpr.PkgName, typeExpr.TypeName(""))
+					log.Println("Failed to find import for arg of type:", typeExpr.TypeName(""))
 				}
 			}
 			method.Args = append(method.Args, &MethodArg{
@@ -498,7 +473,7 @@ func appendAction(fset *token.FileSet, mm methodMap, decl ast.Decl, pkgImportPat
 		}
 
 		// Add this call's args to the renderArgs.
-		pos := fset.Position(callExpr.Lparen)
+		pos := fset.Position(callExpr.Rparen)
 		methodCall := &methodCall{
 			Line:  pos.Line,
 			Names: []string{},
@@ -515,7 +490,7 @@ func appendAction(fset *token.FileSet, mm methodMap, decl ast.Decl, pkgImportPat
 	})
 
 	var recvTypeName string
-	var recvType = funcDecl.Recv.List[0].Type
+	var recvType ast.Expr = funcDecl.Recv.List[0].Type
 	if recvStarType, ok := recvType.(*ast.StarExpr); ok {
 		recvTypeName = recvStarType.X.(*ast.Ident).Name
 	} else {
@@ -622,7 +597,7 @@ func getValidationParameter(funcDecl *ast.FuncDecl, imports map[string]string) *
 			continue
 		}
 
-		if selExpr.Sel.Name == "Validation" && imports[xIdent.Name] == revel.RevelImportPath {
+		if selExpr.Sel.Name == "Validation" && imports[xIdent.Name] == revel.REVEL_IMPORT_PATH {
 			return field.Names[0].Obj
 		}
 	}
@@ -650,7 +625,7 @@ func getStructTypeDecl(decl ast.Decl, fset *token.FileSet) (spec *ast.TypeSpec, 
 	}
 
 	if len(genDecl.Specs) == 0 {
-		revel.RevelLog.Warnf("Surprising: %s:%d Decl contains no specifications", fset.Position(decl.Pos()).Filename, fset.Position(decl.Pos()).Line)
+		revel.WARN.Printf("Surprising: %s:%d Decl contains no specifications", fset.Position(decl.Pos()).Filename, fset.Position(decl.Pos()).Line)
 		return
 	}
 
@@ -663,7 +638,7 @@ func getStructTypeDecl(decl ast.Decl, fset *token.FileSet) (spec *ast.TypeSpec, 
 // TypesThatEmbed returns all types that (directly or indirectly) embed the
 // target type, which must be a fully qualified type name,
 // e.g. "github.com/revel/revel.Controller"
-func (s *SourceInfo) TypesThatEmbed(targetType, packageFilter string) (filtered []*TypeInfo) {
+func (s *SourceInfo) TypesThatEmbed(targetType string) (filtered []*TypeInfo) {
 	// Do a search in the "embedded type graph", starting with the target type.
 	var (
 		nodeQueue = []string{targetType}
@@ -695,54 +670,19 @@ func (s *SourceInfo) TypesThatEmbed(targetType, packageFilter string) (filtered 
 			}
 		}
 	}
-	// Strip out any specifications that contain a lower case
-	for exit := false; !exit; exit = true {
-		for i, filteredItem := range filtered {
-			if unicode.IsLower([]rune(filteredItem.StructName)[0]) {
-				revel.RevelLog.Debug("Skipping adding spec for unexported type",
-					"type", filteredItem.StructName,
-					"package", filteredItem.ImportPath)
-				filtered = append(filtered[:i], filtered[i+1:]...)
-				exit = false
-				break
-			}
-		}
-	}
-
-	// Check for any missed types that where from expected packages
-	for _, spec := range s.StructSpecs {
-		if spec.PackageName == packageFilter {
-			found := false
-			for _, filteredItem := range filtered {
-				if filteredItem.StructName == spec.StructName {
-					found = true
-					break
-				}
-			}
-			if !found {
-				revel.RevelLog.Warn("Type found in package: "+packageFilter+
-					", but did not embed from: "+filepath.Base(targetType),
-					"name", spec.StructName, "path", spec.ImportPath)
-			}
-		}
-	}
 	return
 }
 
-// ControllerSpecs returns the all the contollers that embeds
-// `revel.Controller`
 func (s *SourceInfo) ControllerSpecs() []*TypeInfo {
 	if s.controllerSpecs == nil {
-		s.controllerSpecs = s.TypesThatEmbed(revel.RevelImportPath+".Controller", "controllers")
+		s.controllerSpecs = s.TypesThatEmbed(revel.REVEL_IMPORT_PATH + ".Controller")
 	}
 	return s.controllerSpecs
 }
 
-// TestSuites returns the all the Application tests that embeds
-// `testing.TestSuite`
 func (s *SourceInfo) TestSuites() []*TypeInfo {
 	if s.testSuites == nil {
-		s.testSuites = s.TypesThatEmbed(revel.RevelImportPath+"/testing.TestSuite", "testsuite")
+		s.testSuites = s.TypesThatEmbed(revel.REVEL_IMPORT_PATH + "/testing.TestSuite")
 	}
 	return s.testSuites
 }
@@ -765,7 +705,7 @@ func (e TypeExpr) TypeName(pkgOverride string) string {
 	return e.Expr[:e.pkgIndex] + pkgName + "." + e.Expr[e.pkgIndex:]
 }
 
-// NewTypeExpr returns the syntactic expression for referencing this type in Go.
+// This returns the syntactic expression for referencing this type in Go.
 func NewTypeExpr(pkgName string, expr ast.Expr) TypeExpr {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -786,45 +726,40 @@ func NewTypeExpr(pkgName string, expr ast.Expr) TypeExpr {
 		e := NewTypeExpr(pkgName, t.Elt)
 		return TypeExpr{"[]" + e.Expr, e.PkgName, e.pkgIndex + 2, e.Valid}
 	default:
-		revel.RevelLog.Error("Failed to generate name for field. Make sure the field name is valid.")
+		log.Println("Failed to generate name for field. Make sure the field name is valid.")
 	}
 	return TypeExpr{Valid: false}
 }
 
-var builtInTypes = map[string]struct{}{
-	"bool":       {},
-	"byte":       {},
-	"complex128": {},
-	"complex64":  {},
-	"error":      {},
-	"float32":    {},
-	"float64":    {},
-	"int":        {},
-	"int16":      {},
-	"int32":      {},
-	"int64":      {},
-	"int8":       {},
-	"rune":       {},
-	"string":     {},
-	"uint":       {},
-	"uint16":     {},
-	"uint32":     {},
-	"uint64":     {},
-	"uint8":      {},
-	"uintptr":    {},
+var _BUILTIN_TYPES = map[string]struct{}{
+	"bool":       struct{}{},
+	"byte":       struct{}{},
+	"complex128": struct{}{},
+	"complex64":  struct{}{},
+	"error":      struct{}{},
+	"float32":    struct{}{},
+	"float64":    struct{}{},
+	"int":        struct{}{},
+	"int16":      struct{}{},
+	"int32":      struct{}{},
+	"int64":      struct{}{},
+	"int8":       struct{}{},
+	"rune":       struct{}{},
+	"string":     struct{}{},
+	"uint":       struct{}{},
+	"uint16":     struct{}{},
+	"uint32":     struct{}{},
+	"uint64":     struct{}{},
+	"uint8":      struct{}{},
+	"uintptr":    struct{}{},
 }
 
-// IsBuiltinType checks the given type is built-in types of Go
 func IsBuiltinType(name string) bool {
-	_, ok := builtInTypes[name]
+	_, ok := _BUILTIN_TYPES[name]
 	return ok
 }
 
 func importPathFromPath(root string) string {
-	vendoringPath := revel.BasePath + "/vendor/"
-	if strings.HasPrefix(root, vendoringPath) {
-		return filepath.ToSlash(root[len(vendoringPath):])
-	}
 	for _, gopath := range filepath.SplitList(build.Default.GOPATH) {
 		srcPath := filepath.Join(gopath, "src")
 		if strings.HasPrefix(root, srcPath) {
@@ -834,10 +769,10 @@ func importPathFromPath(root string) string {
 
 	srcPath := filepath.Join(build.Default.GOROOT, "src", "pkg")
 	if strings.HasPrefix(root, srcPath) {
-		revel.RevelLog.Warn("Code path should be in GOPATH, but is in GOROOT:", "path", root)
+		revel.WARN.Println("Code path should be in GOPATH, but is in GOROOT:", root)
 		return filepath.ToSlash(root[len(srcPath)+1:])
 	}
 
-	revel.RevelLog.Error("Unexpected! Code path is not in GOPATH:", "path", root)
+	revel.ERROR.Println("Unexpected! Code path is not in GOPATH:", root)
 	return ""
 }

@@ -1,3 +1,6 @@
+# Refer to https://github.com/golang/dep/blob/master/docs/Gopkg.toml.md
+# for detailed Gopkg.toml documentation.
+
 required = ["github.com/revel/cmd/revel"]
 
 [[constraint]]
@@ -42,3 +45,7 @@ required = ["github.com/revel/cmd/revel"]
 
 [[constraint]]
   name = "gopkg.in/check.v1"
+
+[[constraint]]
+  name = "github.com/revel/cmd"
+  revision = "62fc677f3a4043183ad83ccb9cc32165e91dc72e"

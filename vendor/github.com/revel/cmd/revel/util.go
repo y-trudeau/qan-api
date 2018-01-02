@@ -1,16 +1,12 @@
-// Copyright (c) 2012-2016 The Revel Framework Authors, All rights reserved.
-// Revel Framework source code and usage is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package main
 
 import (
 	"archive/tar"
 	"compress/gzip"
 	"fmt"
-	"go/build"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -18,7 +14,7 @@ import (
 	"github.com/revel/revel"
 )
 
-// LoggedError is wrapper to differentiate logged panics from unexpected ones.
+// Use a wrapper to differentiate logged panics from unexpected ones.
 type LoggedError struct{ error }
 
 func panicOnError(err error, msg string) {
@@ -74,7 +70,7 @@ func mustCopyDir(destDir, srcDir string, data map[string]interface{}) error {
 		// Get the relative path from the source base, and the corresponding path in
 		// the dest directory.
 		relSrcPath := strings.TrimLeft(srcPath[len(srcDir):], string(os.PathSeparator))
-		destPath := filepath.Join(destDir, relSrcPath)
+		destPath := path.Join(destDir, relSrcPath)
 
 		// Skip dot files and dot directories.
 		if strings.HasPrefix(relSrcPath, ".") {
@@ -86,7 +82,7 @@ func mustCopyDir(destDir, srcDir string, data map[string]interface{}) error {
 
 		// Create a subdirectory if necessary.
 		if info.IsDir() {
-			err := os.MkdirAll(filepath.Join(destDir, relSrcPath), 0777)
+			err := os.MkdirAll(path.Join(destDir, relSrcPath), 0777)
 			if !os.IsExist(err) {
 				panicOnError(err, "Failed to create directory")
 			}
@@ -108,30 +104,22 @@ func mustCopyDir(destDir, srcDir string, data map[string]interface{}) error {
 func mustTarGzDir(destFilename, srcDir string) string {
 	zipFile, err := os.Create(destFilename)
 	panicOnError(err, "Failed to create archive")
-	defer func() {
-		_ = zipFile.Close()
-	}()
+	defer zipFile.Close()
 
 	gzipWriter := gzip.NewWriter(zipFile)
-	defer func() {
-		_ = gzipWriter.Close()
-	}()
+	defer gzipWriter.Close()
 
 	tarWriter := tar.NewWriter(gzipWriter)
-	defer func() {
-		_ = tarWriter.Close()
-	}()
+	defer tarWriter.Close()
 
-	_ = revel.Walk(srcDir, func(srcPath string, info os.FileInfo, err error) error {
+	revel.Walk(srcDir, func(srcPath string, info os.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
 		}
 
 		srcFile, err := os.Open(srcPath)
 		panicOnError(err, "Failed to read source file")
-		defer func() {
-			_ = srcFile.Close()
-		}()
+		defer srcFile.Close()
 
 		err = tarWriter.WriteHeader(&tar.Header{
 			Name:    strings.TrimLeft(srcPath[len(srcDir):], string(os.PathSeparator)),
@@ -162,15 +150,7 @@ func empty(dirname string) bool {
 	if err != nil {
 		errorf("error opening directory: %s", err)
 	}
-	defer func() {
-		_ = dir.Close()
-	}()
+	defer dir.Close()
 	results, _ := dir.Readdir(1)
 	return len(results) == 0
-}
-
-func importPathFromCurrentDir() string {
-	pwd, _ := os.Getwd()
-	importPath, _ := filepath.Rel(filepath.Join(build.Default.GOPATH, "src"), pwd)
-	return filepath.ToSlash(importPath)
 }
