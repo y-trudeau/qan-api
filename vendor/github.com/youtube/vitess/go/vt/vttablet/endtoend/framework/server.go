@@ -26,6 +26,7 @@ import (
 
 	"github.com/youtube/vitess/go/mysql"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
+	"github.com/youtube/vitess/go/vt/mysqlctl"
 	"github.com/youtube/vitess/go/vt/vtgate/fakerpcvtgateconn"
 	"github.com/youtube/vitess/go/vt/vtgate/vtgateconn"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver"
@@ -53,7 +54,7 @@ func StartServer(connParams, connAppDebugParams mysql.ConnParams) error {
 	// Setup a fake vtgate server.
 	protocol := "resolveTest"
 	*vtgateconn.VtgateProtocol = protocol
-	vtgateconn.RegisterDialer(protocol, func(context.Context, string) (vtgateconn.Impl, error) {
+	vtgateconn.RegisterDialer(protocol, func(context.Context, string, time.Duration) (vtgateconn.Impl, error) {
 		return &txResolver{
 			FakeVTGateConn: fakerpcvtgateconn.FakeVTGateConn{},
 		}, nil
@@ -64,6 +65,12 @@ func StartServer(connParams, connAppDebugParams mysql.ConnParams) error {
 		AppDebug:      connAppDebugParams,
 		SidecarDBName: "_vt",
 	}
+
+	mysqld := mysqlctl.NewMysqld(
+		&mysqlctl.Mycnf{},
+		&dbcfgs,
+		dbconfigs.AppConfig,
+	)
 
 	config := tabletenv.DefaultQsConfig
 	config.EnableAutoCommit = true
@@ -81,7 +88,7 @@ func StartServer(connParams, connAppDebugParams mysql.ConnParams) error {
 
 	Server = tabletserver.NewTabletServerWithNilTopoServer(config)
 	Server.Register()
-	err := Server.StartService(Target, dbcfgs)
+	err := Server.StartService(Target, dbcfgs, mysqld)
 	if err != nil {
 		return fmt.Errorf("could not start service: %v", err)
 	}

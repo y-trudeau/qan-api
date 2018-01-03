@@ -24,6 +24,7 @@ import (
 
 	"github.com/youtube/vitess/go/vt/key"
 	"github.com/youtube/vitess/go/vt/topo"
+	"github.com/youtube/vitess/go/vt/vttablet/sandboxconn"
 
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 	vschemapb "github.com/youtube/vitess/go/vt/proto/vschema"
@@ -36,7 +37,7 @@ type ExplainTopo struct {
 	Keyspaces map[string]*vschemapb.Keyspace
 
 	// Map of ks/shard to test tablet connection
-	TabletConns map[string]*explainTablet
+	TabletConns map[string]*sandboxconn.SandboxConn
 
 	// Synchronization lock
 	Lock sync.Mutex

@@ -41,8 +41,14 @@ func NewDbClient(params *mysql.ConnParams) *DBClient {
 }
 
 func (dc *DBClient) handleError(err error) {
-	if mysql.IsConnErr(err) {
-		dc.Close()
+	// log.Errorf("in DBClient handleError %v", err.(error))
+	if sqlErr, ok := err.(*mysql.SQLError); ok {
+		if sqlErr.Number() >= 2000 && sqlErr.Number() <= 2018 { // mysql connection errors
+			dc.Close()
+		}
+		if sqlErr.Number() == 1317 { // Query was interrupted
+			dc.Close()
+		}
 	}
 }
 

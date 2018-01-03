@@ -26,7 +26,7 @@ import (
 )
 
 // checkKeyspace tests the keyspace part of the API
-func checkKeyspace(t *testing.T, ts *topo.Server) {
+func checkKeyspace(t *testing.T, ts topo.Impl) {
 	ctx := context.Background()
 	keyspaces, err := ts.GetKeyspaces(ctx)
 	if err != nil {
@@ -91,31 +91,44 @@ func checkKeyspace(t *testing.T, ts *topo.Server) {
 		t.Errorf("GetKeyspaces: want %v, got %v", []string{"test_keyspace", "test_keyspace2"}, keyspaces)
 	}
 
-	// Re-read and update. Have to lock it, because UpdateKeyspace
-	// checks for the keyspace lock.
-	storedKI, err := ts.GetKeyspace(ctx, "test_keyspace2")
+	// re-read and update.
+	storedK, storedVersion, err := ts.GetKeyspace(ctx, "test_keyspace2")
 	if err != nil {
 		t.Fatalf("GetKeyspace: %v", err)
 	}
-	storedKI.Keyspace.ShardingColumnName = "other_id"
-	lockCtx, unlock, err := ts.LockKeyspace(ctx, "test_keyspace2", "fake-action")
-	if err != nil {
-		t.Fatalf("LockKeyspace: %v", err)
+	storedK.ShardingColumnName = "other_id"
+	var newServedFroms []*topodatapb.Keyspace_ServedFrom
+	for _, ksf := range storedK.ServedFroms {
+		if ksf.TabletType == topodatapb.TabletType_MASTER {
+			continue
+		}
+		if ksf.TabletType == topodatapb.TabletType_REPLICA {
+			ksf.Keyspace = "test_keyspace4"
+		}
+		newServedFroms = append(newServedFroms, ksf)
 	}
-	if err := ts.UpdateKeyspace(lockCtx, storedKI); err != nil {
+	storedK.ServedFroms = newServedFroms
+	_, err = ts.UpdateKeyspace(ctx, "test_keyspace2", storedK, storedVersion)
+	if err != nil {
 		t.Fatalf("UpdateKeyspace: %v", err)
 	}
-	unlock(&err)
+
+	// unconditional update
+	storedK.ShardingColumnType = topodatapb.KeyspaceIdType_BYTES
+	_, err = ts.UpdateKeyspace(ctx, "test_keyspace2", storedK, -1)
 	if err != nil {
-		t.Fatalf("unlock(test_keyspace2): %v", err)
+		t.Fatalf("UpdateKeyspace(-1): %v", err)
 	}
 
-	// And read again to make sure it's good.
-	storedKI, err = ts.GetKeyspace(ctx, "test_keyspace2")
+	storedK, storedVersion, err = ts.GetKeyspace(ctx, "test_keyspace2")
 	if err != nil {
 		t.Fatalf("GetKeyspace: %v", err)
 	}
-	if storedKI.Keyspace.ShardingColumnName != "other_id" {
-		t.Errorf("UpdateKeyspace failed: got %v, want 'other_id'", storedKI.Keyspace.ShardingColumnName)
+	if storedK.ShardingColumnName != "other_id" ||
+		storedK.ShardingColumnType != topodatapb.KeyspaceIdType_BYTES ||
+		len(storedK.ServedFroms) != 1 ||
+		storedK.ServedFroms[0].TabletType != topodatapb.TabletType_REPLICA ||
+		storedK.ServedFroms[0].Keyspace != "test_keyspace4" {
+		t.Errorf("GetKeyspace: unexpected keyspace, got %v", *storedK)
 	}
 }

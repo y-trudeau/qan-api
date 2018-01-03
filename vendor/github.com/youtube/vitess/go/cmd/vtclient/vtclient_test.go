@@ -18,7 +18,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -30,9 +29,7 @@ import (
 )
 
 func TestVtclient(t *testing.T) {
-	// Build the config for vttest.
-	var cfg vttest.Config
-	cfg.Topology = &vttestpb.VTTestTopology{
+	topology := &vttestpb.VTTestTopology{
 		Keyspaces: []*vttestpb.Keyspace{
 			{
 				Name: "test_keyspace",
@@ -67,19 +64,23 @@ func TestVtclient(t *testing.T) {
 			},
 		},
 	}
-	if err := cfg.InitSchemas("test_keyspace", schema, vschema); err != nil {
-		t.Fatalf("InitSchemas failed: %v", err)
-	}
-	defer os.RemoveAll(cfg.SchemaDir)
-	cluster := vttest.LocalCluster{
-		Config: cfg,
-	}
-	if err := cluster.Setup(); err != nil {
-		t.Fatalf("InitSchemas failed: %v", err)
-	}
-	defer cluster.TearDown()
 
-	vtgateAddr := fmt.Sprintf("localhost:%v", cluster.Env.PortForProtocol("vtcombo", "grpc"))
+	hdl, err := vttest.LaunchVitess(vttest.ProtoTopo(topology), vttest.Schema(schema), vttest.VSchema(vschema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err = hdl.TearDown()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	vtgateAddr, err := hdl.VtgateAddress()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	queries := []struct {
 		args         []string
 		rowsAffected int64

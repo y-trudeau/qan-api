@@ -35,11 +35,16 @@ import (
 func (zs *Server) NewMasterParticipation(name, id string) (topo.MasterParticipation, error) {
 	ctx := context.TODO()
 
-	zkPath := path.Join(zs.root, electionsPath, name)
+	conn, root, err := zs.connForCell(ctx, topo.GlobalCell)
+	if err != nil {
+		return nil, err
+	}
+	zkPath := path.Join(root, electionsPath, name)
 
 	// Create the toplevel directory, OK if it exists already.
 	// We will create the parent directory as well, but not more.
-	if _, err := CreateRecursive(ctx, zs.conn, zkPath, nil, 0, zk.WorldACL(PermDirectory), 1); err != nil && err != zk.ErrNodeExists {
+	_, err = CreateRecursive(ctx, conn, zkPath, nil, 0, zk.WorldACL(PermDirectory), 1)
+	if err != nil && err != zk.ErrNodeExists {
 		return nil, convertError(err)
 	}
 
@@ -90,7 +95,11 @@ func (mp *zkMasterParticipation) WaitForMastership() (context.Context, error) {
 	}
 
 	ctx := context.TODO()
-	zkPath := path.Join(mp.zs.root, electionsPath, mp.name)
+	conn, root, err := mp.zs.connForCell(ctx, topo.GlobalCell)
+	if err != nil {
+		return nil, err
+	}
+	zkPath := path.Join(root, electionsPath, mp.name)
 
 	// Fast path if Stop was already called.
 	select {
@@ -101,7 +110,7 @@ func (mp *zkMasterParticipation) WaitForMastership() (context.Context, error) {
 	}
 
 	// Create the current proposal.
-	proposal, err := mp.zs.conn.Create(ctx, zkPath+"/", mp.id, zk.FlagSequence|zk.FlagEphemeral, zk.WorldACL(PermFile))
+	proposal, err := conn.Create(ctx, zkPath+"/", mp.id, zk.FlagSequence|zk.FlagEphemeral, zk.WorldACL(PermFile))
 	if err != nil {
 		return nil, fmt.Errorf("cannot create proposal file in %v: %v", zkPath, err)
 	}
@@ -109,7 +118,7 @@ func (mp *zkMasterParticipation) WaitForMastership() (context.Context, error) {
 	// Wait until we are it, or we are interrupted. Using a
 	// small-ish time out so it gets exercised faster (as opposed
 	// to crashing after a day of use).
-	err = obtainQueueLock(mp.stopCtx, mp.zs.conn, proposal)
+	err = obtainQueueLock(mp.stopCtx, conn, proposal)
 	switch err {
 	case nil:
 		break
@@ -123,7 +132,7 @@ func (mp *zkMasterParticipation) WaitForMastership() (context.Context, error) {
 
 	// we got the lock, create our background context
 	ctx, cancel := context.WithCancel(context.Background())
-	go mp.watchMastership(ctx, mp.zs.conn, proposal, cancel)
+	go mp.watchMastership(ctx, conn, proposal, cancel)
 	return ctx, nil
 }
 
@@ -133,7 +142,7 @@ func (mp *zkMasterParticipation) WaitForMastership() (context.Context, error) {
 //   it most likely means we lost the ZK session, so we want to stop
 //   being the master.
 // - wait for mp.stop.
-func (mp *zkMasterParticipation) watchMastership(ctx context.Context, conn *ZkConn, proposal string, cancel context.CancelFunc) {
+func (mp *zkMasterParticipation) watchMastership(ctx context.Context, conn Conn, proposal string, cancel context.CancelFunc) {
 	// any interruption of this routine means we're not master any more.
 	defer cancel()
 
@@ -169,10 +178,14 @@ func (mp *zkMasterParticipation) Stop() {
 // GetCurrentMasterID is part of the topo.MasterParticipation interface.
 // We just read the smallest (first) node content, that is the id.
 func (mp *zkMasterParticipation) GetCurrentMasterID(ctx context.Context) (string, error) {
-	zkPath := path.Join(mp.zs.root, electionsPath, mp.name)
+	conn, root, err := mp.zs.connForCell(ctx, topo.GlobalCell)
+	if err != nil {
+		return "", err
+	}
+	zkPath := path.Join(root, electionsPath, mp.name)
 
 	for {
-		children, _, err := mp.zs.conn.Children(ctx, zkPath)
+		children, _, err := conn.Children(ctx, zkPath)
 		if err != nil {
 			return "", convertError(err)
 		}
@@ -183,7 +196,7 @@ func (mp *zkMasterParticipation) GetCurrentMasterID(ctx context.Context) (string
 		sort.Strings(children)
 
 		childPath := path.Join(zkPath, children[0])
-		data, _, err := mp.zs.conn.Get(ctx, childPath)
+		data, _, err := conn.Get(ctx, childPath)
 		if err != nil {
 			if err == zk.ErrNoNode {
 				// master terminated in front of our own eyes,

@@ -505,9 +505,9 @@ func (wr *Wrangler) waitForDrainInCell(ctx context.Context, cell, keyspace, shar
 	retryDelay, healthCheckTopologyRefresh, healthcheckRetryDelay, healthCheckTimeout, initialWait time.Duration) error {
 
 	// Create the healthheck module, with a cache.
-	hc := discovery.NewHealthCheck(healthcheckRetryDelay, healthCheckTimeout)
+	hc := discovery.NewHealthCheck(healthCheckTimeout /* connectTimeout */, healthcheckRetryDelay, healthCheckTimeout)
 	defer hc.Close()
-	tsc := discovery.NewTabletStatsCache(hc, wr.TopoServer(), cell)
+	tsc := discovery.NewTabletStatsCache(hc, cell)
 
 	// Create a tablet watcher.
 	watcher := discovery.NewShardReplicationWatcher(wr.TopoServer(), hc, cell, keyspace, shard, healthCheckTopologyRefresh, discovery.DefaultTopoReadConcurrency)
@@ -708,7 +708,11 @@ func (wr *Wrangler) replicaMigrateServedFrom(ctx context.Context, ki *topo.Keysp
 	// Now refresh the source servers so they reload their
 	// blacklisted table list
 	event.DispatchUpdate(ev, "refreshing sources tablets state so they update their blacklisted tables")
-	return wr.RefreshTabletsByShard(ctx, sourceShard, []topodatapb.TabletType{servedType}, cells)
+	if err := wr.RefreshTabletsByShard(ctx, sourceShard, []topodatapb.TabletType{servedType}, cells); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // masterMigrateServedFrom handles the master migration. The ordering is
@@ -785,7 +789,11 @@ func (wr *Wrangler) masterMigrateServedFrom(ctx context.Context, ki *topo.Keyspa
 	// Invoking a remote action will also make the tablet stop filtered
 	// replication.
 	event.DispatchUpdate(ev, "setting destination shard masters read-write")
-	return wr.refreshMasters(ctx, []*topo.ShardInfo{destinationShard})
+	if err := wr.refreshMasters(ctx, []*topo.ShardInfo{destinationShard}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SetKeyspaceServedFrom locks a keyspace and changes its ServerFromMap
@@ -827,12 +835,6 @@ func (wr *Wrangler) RefreshTabletsByShard(ctx context.Context, si *topo.ShardInf
 	wg := sync.WaitGroup{}
 	for _, ti := range tabletMap {
 		if tabletTypes != nil && !topoproto.IsTypeInList(ti.Type, tabletTypes) {
-			continue
-		}
-		if ti.Hostname == "" {
-			// The tablet is not running, we don't have the host
-			// name to connect to, so we just skip this tablet.
-			wr.Logger().Infof("Tablet %v has no hostname, skipping its RefreshState", ti.AliasString())
 			continue
 		}
 

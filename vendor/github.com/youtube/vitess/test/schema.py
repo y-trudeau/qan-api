@@ -365,7 +365,8 @@ class TestSchema(unittest.TestCase):
                                    'test_keyspace/2'],
                                   expect_fail=True,
                                   auto_log=True)
-      self.assertIn('schemas are different', stderr)
+      self.assertIn('source and dest don\'t agree on database creation command',
+                    stderr)
 
       # shard_2_master should have the same number of tables. Only the db
       # character set is different.

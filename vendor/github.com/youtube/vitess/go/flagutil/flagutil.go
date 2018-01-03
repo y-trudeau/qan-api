@@ -29,7 +29,6 @@ import (
 // it with a backslash '\'.
 type StringListValue []string
 
-// Get returns the []string value of this flag.
 func (value StringListValue) Get() interface{} {
 	return []string(value)
 }
@@ -61,13 +60,11 @@ func parseListWithEscapes(v string, delimiter rune) (value []string) {
 	return value
 }
 
-// Set sets the value of this flag from parsing the given string.
 func (value *StringListValue) Set(v string) error {
 	*value = parseListWithEscapes(v, ',')
 	return nil
 }
 
-// String returns the string representation of this flag.
 func (value StringListValue) String() string {
 	parts := make([]string, len(value))
 	for i, v := range value {
@@ -89,7 +86,6 @@ func StringListVar(p *[]string, name string, defaultValue []string, usage string
 // keys cannot contain colons.
 type StringMapValue map[string]string
 
-// Set sets the value of this flag from parsing the given string.
 func (value *StringMapValue) Set(v string) error {
 	dict := make(map[string]string)
 	pairs := parseListWithEscapes(v, ',')
@@ -101,12 +97,10 @@ func (value *StringMapValue) Set(v string) error {
 	return nil
 }
 
-// Get returns the map[string]string value of this flag.
 func (value StringMapValue) Get() interface{} {
 	return map[string]string(value)
 }
 
-// String returns the string representation of this flag.
 func (value StringMapValue) String() string {
 	parts := make([]string, 0)
 	for k, v := range value {

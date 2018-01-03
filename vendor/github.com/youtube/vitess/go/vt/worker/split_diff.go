@@ -124,7 +124,6 @@ func (sdw *SplitDiffWorker) Run(ctx context.Context) error {
 		}
 	}
 	if err != nil {
-		sdw.wr.Logger().Errorf("Run() error: %v", err)
 		sdw.SetState(WorkerStateError)
 		return err
 	}

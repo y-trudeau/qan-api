@@ -26,18 +26,18 @@ import (
 )
 
 // NewMasterParticipation is part of the topo.Server interface
-func (c *Conn) NewMasterParticipation(name, id string) (topo.MasterParticipation, error) {
-	c.factory.mu.Lock()
-	defer c.factory.mu.Unlock()
+func (mt *MemoryTopo) NewMasterParticipation(name, id string) (topo.MasterParticipation, error) {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
 
 	// Make sure the global path exists.
 	electionPath := path.Join(electionsPath, name)
-	if n := c.factory.getOrCreatePath(c.cell, electionPath); n == nil {
+	if n := mt.getOrCreatePath(topo.GlobalCell, electionPath); n == nil {
 		return nil, topo.ErrNoNode
 	}
 
-	return &cMasterParticipation{
-		c:    c,
+	return &mtMasterParticipation{
+		mt:   mt,
 		name: name,
 		id:   id,
 		stop: make(chan struct{}),
@@ -45,14 +45,14 @@ func (c *Conn) NewMasterParticipation(name, id string) (topo.MasterParticipation
 	}, nil
 }
 
-// cMasterParticipation implements topo.MasterParticipation.
+// mtMasterParticipation implements topo.MasterParticipation.
 //
 // We use a directory (in global election path, with the name) with
 // ephemeral files in it, that contains the id.  The oldest revision
 // wins the election.
-type cMasterParticipation struct {
-	// c is our memorytopo connection
-	c *Conn
+type mtMasterParticipation struct {
+	// s is our parent etcd topo Server
+	mt *MemoryTopo
 
 	// name is the name of this MasterParticipation
 	name string
@@ -68,7 +68,7 @@ type cMasterParticipation struct {
 }
 
 // WaitForMastership is part of the topo.MasterParticipation interface.
-func (mp *cMasterParticipation) WaitForMastership() (context.Context, error) {
+func (mp *mtMasterParticipation) WaitForMastership() (context.Context, error) {
 	// If Stop was already called, mp.done is closed, so we are interrupted.
 	select {
 	case <-mp.done:
@@ -77,7 +77,7 @@ func (mp *cMasterParticipation) WaitForMastership() (context.Context, error) {
 	}
 
 	electionPath := path.Join(electionsPath, mp.name)
-	var ld topo.LockDescriptor
+	lockPath := ""
 
 	// We use a cancelable context here. If stop is closed,
 	// we just cancel that context.
@@ -85,9 +85,9 @@ func (mp *cMasterParticipation) WaitForMastership() (context.Context, error) {
 	go func() {
 		select {
 		case <-mp.stop:
-			if ld != nil {
-				if err := ld.Unlock(context.Background()); err != nil {
-					log.Errorf("failed to unlock LockDescriptor %v: %v", electionPath, err)
+			if lockPath != "" {
+				if err := mp.mt.unlock(context.Background(), electionPath, lockPath); err != nil {
+					log.Errorf("failed to delete lockPath %v for election %v: %v", lockPath, mp.name, err)
 				}
 			}
 			lockCancel()
@@ -97,7 +97,7 @@ func (mp *cMasterParticipation) WaitForMastership() (context.Context, error) {
 
 	// Try to get the mastership, by getting a lock.
 	var err error
-	ld, err = mp.c.Lock(lockCtx, electionPath, mp.id)
+	lockPath, err = mp.mt.lock(lockCtx, electionPath, mp.id)
 	if err != nil {
 		// It can be that we were interrupted.
 		return nil, err
@@ -109,19 +109,19 @@ func (mp *cMasterParticipation) WaitForMastership() (context.Context, error) {
 }
 
 // Stop is part of the topo.MasterParticipation interface
-func (mp *cMasterParticipation) Stop() {
+func (mp *mtMasterParticipation) Stop() {
 	close(mp.stop)
 	<-mp.done
 }
 
 // GetCurrentMasterID is part of the topo.MasterParticipation interface
-func (mp *cMasterParticipation) GetCurrentMasterID(ctx context.Context) (string, error) {
+func (mp *mtMasterParticipation) GetCurrentMasterID(ctx context.Context) (string, error) {
 	electionPath := path.Join(electionsPath, mp.name)
 
-	mp.c.factory.mu.Lock()
-	defer mp.c.factory.mu.Unlock()
+	mp.mt.mu.Lock()
+	defer mp.mt.mu.Unlock()
 
-	n := mp.c.factory.nodeByPath(mp.c.cell, electionPath)
+	n := mp.mt.nodeByPath(topo.GlobalCell, electionPath)
 	if n == nil {
 		return "", nil
 	}

@@ -96,7 +96,6 @@
   revision = "b561fedcb9dd988e592a6fb88bdf05596e598af1"
 
 [[projects]]
-  branch = "master"
   name = "github.com/percona/pmm"
   packages = [
     "proto",
@@ -105,7 +104,7 @@
     "proto/qan",
     "proto/query"
   ]
-  revision = "4f6735732a7859e6fa3f2113404876f0caab08e4"
+  revision = "8951ae806e03cb6dc8cc01f32e8cb705a69e818c"
 
 [[projects]]
   name = "github.com/pkg/errors"
@@ -162,12 +161,15 @@
   version = "v1.2.0"
 
 [[projects]]
-  branch = "master"
   name = "github.com/youtube/vitess"
   packages = [
     "go/bytes2",
+    "go/event",
     "go/hack",
     "go/sqltypes",
+    "go/tb",
+    "go/vt/logutil",
+    "go/vt/proto/logutil",
     "go/vt/proto/query",
     "go/vt/proto/topodata",
     "go/vt/proto/vtgate",
@@ -175,7 +177,7 @@
     "go/vt/sqlparser",
     "go/vt/vterrors"
   ]
-  revision = "3c55c933ee6f7552bd879289e5bf979d15e7fbf4"
+  revision = "9b42ea02086d8061f2fd49df6a00670689485fc7"
 
 [[projects]]
   branch = "master"
@@ -222,6 +224,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "160ba80f9ba644293881c28eb655416015425aca2be445bda13cd67236ee8243"
+  inputs-digest = "85fbd181d5a5af108907afc75400b58c6b0013422dc199c9e642c1ebc718936a"
   solver-name = "gps-cdcl"
   solver-version = 1

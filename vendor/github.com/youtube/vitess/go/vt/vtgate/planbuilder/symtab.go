@@ -24,8 +24,6 @@ import (
 
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vtgate/vindexes"
-
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
 )
 
 // symtab represents the symbol table for a SELECT statement
@@ -111,45 +109,15 @@ func (st *symtab) AddVindexTable(alias sqlparser.TableName, vindexTable *vindexe
 		origin:  rb,
 	}
 
-	for _, col := range vindexTable.Columns {
-		t.columns[col.Name.Lowered()] = &column{
+	// Pre-create vindex columns
+	for _, cv := range vindexTable.ColumnVindexes {
+		c := &column{
 			origin: rb,
-			name:   col.Name,
-			typ:    col.Type,
+			Vindex: cv.Vindex,
+			name:   cv.Column,
 			table:  t,
 		}
-	}
-
-	for _, cv := range vindexTable.ColumnVindexes {
-		for i, cvcol := range cv.Columns {
-			var vindex vindexes.Vindex
-			if i == 0 {
-				// For now, only the first column is used for vindex Map functions.
-				vindex = cv.Vindex
-			}
-			lowered := cvcol.Lowered()
-			if col, ok := t.columns[lowered]; ok {
-				col.Vindex = vindex
-				continue
-			}
-			t.columns[lowered] = &column{
-				origin: rb,
-				Vindex: vindex,
-				name:   cvcol,
-				table:  t,
-			}
-		}
-	}
-
-	if ai := vindexTable.AutoIncrement; ai != nil {
-		lowered := ai.Column.Lowered()
-		if _, ok := t.columns[lowered]; !ok {
-			t.columns[lowered] = &column{
-				origin: rb,
-				name:   ai.Column,
-				table:  t,
-			}
-		}
+		t.columns[cv.Column.Lowered()] = c
 	}
 	return st.AddTable(t)
 }
@@ -184,11 +152,11 @@ func (st *symtab) AddTable(t *table) error {
 	// update the uniqueColumns list, and eliminate
 	// duplicate symbols if found.
 	for colname, c := range t.columns {
+		if c.Vindex == nil {
+			continue
+		}
 		if _, ok := st.uniqueColumns[colname]; ok {
-			// Keep the entry, but make it nil. This will
-			// ensure that yet another column of the same name
-			// doesn't get added back in.
-			st.uniqueColumns[colname] = nil
+			delete(st.uniqueColumns, colname)
 			continue
 		}
 		st.uniqueColumns[colname] = c
@@ -307,9 +275,7 @@ func (st *symtab) searchTables(col *sqlparser.ColName) (*column, error) {
 	// only one in the symtab. So, such expressions will be implicitly matched.
 	if col.Qualifier.IsEmpty() || strings.HasPrefix(col.Qualifier.Name.String(), "@@") {
 		// Search uniqueColumns first. If found, our job is done.
-		// Check for nil because there can be nil entries if there
-		// are duplicate columns across multiple tables.
-		if c := st.uniqueColumns[col.Name.Lowered()]; c != nil {
+		if c, ok := st.uniqueColumns[col.Name.Lowered()]; ok {
 			return c, nil
 		}
 
@@ -471,11 +437,9 @@ type column struct {
 	origin columnOriginator
 	Vindex vindexes.Vindex
 	name   sqlparser.ColIdent
-	typ    querypb.Type
 	table  *table
 
-	// colnum is set only for primitives that can return a
-	// subset of their internal result like subquery or vindexFunc.
+	// colnum is set only if it originates from a subquery.
 	colnum int
 }
 

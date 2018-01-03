@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -153,6 +152,7 @@ func run() (*results, error) {
 		Protocol:  *vtgateconn.VtgateProtocol,
 		Address:   *server,
 		Target:    *targetString,
+		Timeout:   *timeout,
 		Streaming: *streaming,
 	}
 	db, err := vitessdriver.OpenWithConfiguration(c)
@@ -162,9 +162,7 @@ func run() (*results, error) {
 
 	log.Infof("Sending the query...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
-	defer cancel()
-	return execMulti(ctx, db, args[0])
+	return execMulti(db, args[0])
 }
 
 func prepareBindVariables() []interface{} {
@@ -175,7 +173,7 @@ func prepareBindVariables() []interface{} {
 	return bv
 }
 
-func execMulti(ctx context.Context, db *sql.DB, sql string) (*results, error) {
+func execMulti(db *sql.DB, sql string) (*results, error) {
 	all := newResults()
 	ec := concurrency.FirstErrorRecorder{}
 	wg := sync.WaitGroup{}
@@ -192,9 +190,9 @@ func execMulti(ctx context.Context, db *sql.DB, sql string) (*results, error) {
 				var qr *results
 				var err error
 				if isDML {
-					qr, err = execDml(ctx, db, sql)
+					qr, err = execDml(db, sql)
 				} else {
-					qr, err = execNonDml(ctx, db, sql)
+					qr, err = execNonDml(db, sql)
 				}
 				if *count == 1 && *parallel == 1 {
 					all = qr
@@ -219,14 +217,14 @@ func execMulti(ctx context.Context, db *sql.DB, sql string) (*results, error) {
 	return all, ec.Error()
 }
 
-func execDml(ctx context.Context, db *sql.DB, sql string) (*results, error) {
+func execDml(db *sql.DB, sql string) (*results, error) {
 	start := time.Now()
 	tx, err := db.Begin()
 	if err != nil {
 		return nil, vterrors.Wrap(err, "BEGIN failed")
 	}
 
-	result, err := tx.ExecContext(ctx, sql, []interface{}(prepareBindVariables())...)
+	result, err := tx.Exec(sql, []interface{}(prepareBindVariables())...)
 	if err != nil {
 		return nil, vterrors.Wrap(err, "failed to execute DML")
 	}
@@ -245,9 +243,9 @@ func execDml(ctx context.Context, db *sql.DB, sql string) (*results, error) {
 	}, nil
 }
 
-func execNonDml(ctx context.Context, db *sql.DB, sql string) (*results, error) {
+func execNonDml(db *sql.DB, sql string) (*results, error) {
 	start := time.Now()
-	rows, err := db.QueryContext(ctx, sql, []interface{}(prepareBindVariables())...)
+	rows, err := db.Query(sql, []interface{}(prepareBindVariables())...)
 	if err != nil {
 		return nil, vterrors.Wrap(err, "client error")
 	}

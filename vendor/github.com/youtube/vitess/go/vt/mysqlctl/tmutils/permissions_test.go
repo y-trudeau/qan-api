@@ -38,7 +38,6 @@ func mapToSQLResults(row map[string]string) ([]*querypb.Field, []sqltypes.Value)
 }
 
 func testPermissionsDiff(t *testing.T, left, right *tabletmanagerdatapb.Permissions, leftName, rightName string, expected []string) {
-	t.Helper()
 
 	actual := DiffPermissionsToArray(leftName, left, rightName, right)
 
@@ -119,14 +118,14 @@ func TestPermissionsDiff(t *testing.T) {
 		"Insert_priv": "N",
 	})))
 	testPermissionsDiff(t, p1, p2, "p1", "p2", []string{
-		"permissions differ on user %:vt:\n" +
-			"p1: UserPermission PasswordChecksum(4831957779889520640) Insert_priv(N) Select_priv(Y)\n" +
+		"p1 and p2 disagree on user %:vt:\n" +
+			"UserPermission PasswordChecksum(4831957779889520640) Insert_priv(N) Select_priv(Y)\n" +
 			" differs from:\n" +
-			"p2: UserPermission PasswordChecksum(4831957779889520640) Insert_priv(Y) Select_priv(Y)",
-		"permissions differ on db %:vt_live:vt:\n" +
-			"p1: DbPermission Insert_priv(N) Select_priv(Y)\n" +
+			"UserPermission PasswordChecksum(4831957779889520640) Insert_priv(Y) Select_priv(Y)",
+		"p1 and p2 disagree on db %:vt_live:vt:\n" +
+			"DbPermission Insert_priv(N) Select_priv(Y)\n" +
 			" differs from:\n" +
-			"p2: DbPermission Insert_priv(Y) Select_priv(N)",
+			"DbPermission Insert_priv(Y) Select_priv(N)",
 	})
 
 	p2.UserPermissions[0].Privileges["Insert_priv"] = "N"

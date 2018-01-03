@@ -83,12 +83,7 @@ func checkAggregates(sel *sqlparser.Select, bldr builder) (builder, error) {
 	if !hasAggregates {
 		return bldr, nil
 	}
-
-	// The query has aggregates. We can proceed only
-	// if the underlying primitive is a route because
-	// we need the ability to push down group by and
-	// order by clauses.
-	if !isRoute {
+	if hasAggregates && !isRoute {
 		return bldr, errors.New("unsupported: cross-shard query with aggregates")
 	}
 
@@ -443,11 +438,6 @@ func (oa *orderedAggregate) PushOrderBy(orderBy sqlparser.OrderBy) error {
 
 // PushOrderByNull satisfies the builder interface.
 func (oa *orderedAggregate) PushOrderByNull() {
-	panic("BUG: unreachable")
-}
-
-// PushOrderByRand satisfies the builder interface.
-func (oa *orderedAggregate) PushOrderByRand() {
 	panic("BUG: unreachable")
 }
 

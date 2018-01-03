@@ -19,8 +19,6 @@ package vtexplain
 import (
 	"encoding/json"
 	"testing"
-
-	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 )
 
 func TestParseSchema(t *testing.T) {
@@ -42,10 +40,7 @@ create table t2 (
 	}
 	initTabletEnvironment(ddls, defaultTestOpts())
 
-	tablet := newTablet(&topodatapb.Tablet{
-		Keyspace: "test_keyspace",
-		Shard:    "-80",
-	})
+	tablet := newFakeTablet()
 	se := tablet.tsv.SchemaEngine()
 	tables := se.GetSchema()
 

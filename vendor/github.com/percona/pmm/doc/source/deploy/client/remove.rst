@@ -4,14 +4,14 @@
 Removing PMM Client
 ===================
 
-1. Remove all monitored instances as described in :ref:`pmm-admin.rm`.
+1. Remove all monitored instances as described in :ref:`pmm-admin-rm`.
 
 2. Change into the directory with the extracted *PMM Client* tarball
-   and run as root:
+   and run:
 
    .. code-block:: bash
 
-      $ ./uninstall
+      $ sudo ./uninstall
 
 .. note::
 

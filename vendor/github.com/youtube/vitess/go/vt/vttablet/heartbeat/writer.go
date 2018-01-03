@@ -26,7 +26,6 @@ import (
 
 	"github.com/youtube/vitess/go/hack"
 	"github.com/youtube/vitess/go/mysql"
-	"github.com/youtube/vitess/go/sqlescape"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/stats"
 	"github.com/youtube/vitess/go/timer"
@@ -57,8 +56,6 @@ const (
 // Writer runs on master tablets and writes heartbeats to the _vt.heartbeat
 // table at a regular interval, defined by heartbeat_interval.
 type Writer struct {
-	dbconfigs dbconfigs.DBConfigs
-
 	enabled       bool
 	interval      time.Duration
 	tabletAlias   topodata.TabletAlias
@@ -89,23 +86,18 @@ func NewWriter(checker connpool.MySQLChecker, alias topodata.TabletAlias, config
 	}
 }
 
-// InitDBConfig must be called before Init.
-func (w *Writer) InitDBConfig(dbcfgs dbconfigs.DBConfigs) {
-	w.dbconfigs = dbcfgs
-}
-
 // Init runs at tablet startup and last minute initialization of db settings, and
 // creates the necessary tables for heartbeat.
-func (w *Writer) Init(target query.Target) error {
+func (w *Writer) Init(dbc dbconfigs.DBConfigs, target query.Target) error {
 	if !w.enabled {
 		return nil
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	log.Info("Initializing heartbeat table.")
-	w.dbName = sqlescape.EscapeID(w.dbconfigs.SidecarDBName)
+	w.dbName = sqlparser.Backtick(dbc.SidecarDBName)
 	w.keyspaceShard = fmt.Sprintf("%s:%s", target.Keyspace, target.Shard)
-	err := w.initializeTables(&w.dbconfigs.Dba)
+	err := w.initializeTables(&dbc.Dba)
 	if err != nil {
 		w.recordError(err)
 		return err
@@ -118,7 +110,7 @@ func (w *Writer) Init(target query.Target) error {
 // responsible for periodically writing to the heartbeat table.
 // Open may be called multiple times, as long as it was closed since
 // last invocation.
-func (w *Writer) Open() {
+func (w *Writer) Open(dbc dbconfigs.DBConfigs) {
 	if !w.enabled {
 		return
 	}
@@ -128,7 +120,7 @@ func (w *Writer) Open() {
 		return
 	}
 	log.Info("Beginning heartbeat writes")
-	w.pool.Open(&w.dbconfigs.App, &w.dbconfigs.Dba, &w.dbconfigs.AppDebug)
+	w.pool.Open(&dbc.App, &dbc.Dba, &dbc.AppDebug)
 	w.ticks.Start(func() { w.writeHeartbeat() })
 	w.isOpen = true
 }

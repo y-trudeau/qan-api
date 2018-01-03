@@ -76,7 +76,26 @@ func processTableExpr(tableExpr sqlparser.TableExpr, vschema VSchema) (builder, 
 func processAliasedTable(tableExpr *sqlparser.AliasedTableExpr, vschema VSchema) (builder, error) {
 	switch expr := tableExpr.Expr.(type) {
 	case sqlparser.TableName:
-		return buildTablePrimitive(tableExpr, expr, vschema)
+		eroute, table, err := buildERoute(expr, vschema)
+		if err != nil {
+			return nil, err
+		}
+		rb := newRoute(
+			&sqlparser.Select{From: sqlparser.TableExprs([]sqlparser.TableExpr{tableExpr})},
+			eroute,
+			nil,
+			vschema,
+		)
+		if table != nil {
+			alias := expr
+			if !tableExpr.As.IsEmpty() {
+				alias = sqlparser.TableName{Name: tableExpr.As}
+			}
+
+			// AddVindexTable can never fail because symtab is empty.
+			_ = rb.symtab.AddVindexTable(alias, table, rb)
+		}
+		return rb, nil
 	case *sqlparser.Subquery:
 		var err error
 		var subplan builder
@@ -111,13 +130,13 @@ func processAliasedTable(tableExpr *sqlparser.AliasedTableExpr, vschema VSchema)
 			// Check if a colvindex of the same name already exists.
 			// Dups are not allowed in subqueries in this situation.
 			for _, colVindex := range table.ColumnVindexes {
-				if colVindex.Columns[0].Equal(rc.alias) {
+				if colVindex.Column.Equal(rc.alias) {
 					return nil, fmt.Errorf("duplicate column aliases: %v", rc.alias)
 				}
 			}
 			table.ColumnVindexes = append(table.ColumnVindexes, &vindexes.ColumnVindex{
-				Columns: []sqlparser.ColIdent{rc.alias},
-				Vindex:  rc.column.Vindex,
+				Column: rc.alias,
+				Vindex: rc.column.Vindex,
 			})
 		}
 		rb := newRoute(
@@ -134,44 +153,27 @@ func processAliasedTable(tableExpr *sqlparser.AliasedTableExpr, vschema VSchema)
 	panic(fmt.Sprintf("BUG: unexpected table expression type: %T", tableExpr.Expr))
 }
 
-// buildTablePrimitive builds a primitive based on the table name.
-func buildTablePrimitive(tableExpr *sqlparser.AliasedTableExpr, tableName sqlparser.TableName, vschema VSchema) (builder, error) {
-	alias := tableName
-	if !tableExpr.As.IsEmpty() {
-		alias = sqlparser.TableName{Name: tableExpr.As}
-	}
-	rb := newRoute(
-		&sqlparser.Select{From: sqlparser.TableExprs([]sqlparser.TableExpr{tableExpr})},
-		nil,
-		nil,
-		vschema,
-	)
+// buildERoute produces the initial engine.Route for the specified TableName.
+// It also returns the associated vschema info (*Table) so that
+// it can be used to create the symbol table entry.
+func buildERoute(tableName sqlparser.TableName, vschema VSchema) (*engine.Route, *vindexes.Table, error) {
 	if systemTable(tableName.Qualifier.String()) {
 		ks, err := vschema.DefaultKeyspace()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		rb.ERoute = engine.NewRoute(engine.ExecDBA, ks)
-		return rb, nil
+		return engine.NewRoute(engine.ExecDBA, ks), nil, nil
 	}
 
-	table, vindex, err := vschema.FindTableOrVindex(tableName)
+	table, err := vschema.Find(tableName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if vindex != nil {
-		return newVindexFunc(alias, vindex, vschema), nil
-	}
-	// AddVindexTable can never fail because symtab is empty.
-	_ = rb.symtab.AddVindexTable(alias, table, rb)
-
 	if !table.Keyspace.Sharded {
-		rb.ERoute = engine.NewRoute(engine.SelectUnsharded, table.Keyspace)
-		return rb, nil
+		return engine.NewRoute(engine.SelectUnsharded, table.Keyspace), table, nil
 	}
 	if table.Pinned == nil {
-		rb.ERoute = engine.NewRoute(engine.SelectScatter, table.Keyspace)
-		return rb, nil
+		return engine.NewRoute(engine.SelectScatter, table.Keyspace), table, nil
 	}
 	// Pinned tables have their keyspace ids already assigned.
 	// Use the Binary vindex, which is the identity function
@@ -179,8 +181,7 @@ func buildTablePrimitive(tableExpr *sqlparser.AliasedTableExpr, tableName sqlpar
 	route := engine.NewRoute(engine.SelectEqualUnique, table.Keyspace)
 	route.Vindex, _ = vindexes.NewBinary("binary", nil)
 	route.Values = []sqltypes.PlanValue{{Value: sqltypes.MakeTrusted(sqltypes.VarBinary, table.Pinned)}}
-	rb.ERoute = route
-	return rb, nil
+	return route, table, nil
 }
 
 // processJoin produces a builder subtree for the given Join.

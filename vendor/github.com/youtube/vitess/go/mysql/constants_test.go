@@ -36,10 +36,7 @@ func TestIsConnErr(t *testing.T) {
 		want: true,
 	}, {
 		in:   NewSQLError(CRServerLost, "", ""),
-		want: true,
-	}, {
-		in:   NewSQLError(ERQueryInterrupted, "", ""),
-		want: true,
+		want: false,
 	}, {
 		in:   NewSQLError(CRCantReadCharset, "", ""),
 		want: false,

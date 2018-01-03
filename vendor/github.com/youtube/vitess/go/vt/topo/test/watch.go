@@ -31,12 +31,12 @@ import (
 // waitForInitialValue waits for the initial value of
 // keyspaces/test_keyspace/SrvKeyspace to appear, and match the
 // provided srvKeyspace.
-func waitForInitialValue(t *testing.T, conn topo.Conn, srvKeyspace *topodatapb.SrvKeyspace) (changes <-chan *topo.WatchData, cancel func()) {
+func waitForInitialValue(t *testing.T, ts topo.Impl, cell string, srvKeyspace *topodatapb.SrvKeyspace) (changes <-chan *topo.WatchData, cancel func()) {
 	var current *topo.WatchData
 	ctx := context.Background()
 	start := time.Now()
 	for {
-		current, changes, cancel = conn.Watch(ctx, "keyspaces/test_keyspace/SrvKeyspace")
+		current, changes, cancel = ts.Watch(ctx, cell, "keyspaces/test_keyspace/SrvKeyspace")
 		if current.Err == topo.ErrNoNode {
 			// hasn't appeared yet
 			if time.Now().Sub(start) > 10*time.Second {
@@ -62,17 +62,14 @@ func waitForInitialValue(t *testing.T, conn topo.Conn, srvKeyspace *topodatapb.S
 	return changes, cancel
 }
 
-// checkWatch runs the tests on the Watch part of the Conn API.
-// We use a SrvKeyspace object.
-func checkWatch(t *testing.T, ts *topo.Server) {
+// checkWatch runs the tests on the Watch part of the Backend API.
+// We can't just use the full API yet, so use SrvKeyspace for now.
+func checkWatch(t *testing.T, ts topo.Impl) {
 	ctx := context.Background()
-	conn, err := ts.ConnForCell(ctx, LocalCellName)
-	if err != nil {
-		t.Fatalf("ConnForCell(test) failed: %v", err)
-	}
+	cell := getLocalCell(ctx, t, ts)
 
 	// start watching something that doesn't exist -> error
-	current, changes, cancel := conn.Watch(ctx, "keyspaces/test_keyspace/SrvKeyspace")
+	current, changes, cancel := ts.Watch(ctx, cell, "keyspaces/test_keyspace/SrvKeyspace")
 	if current.Err != topo.ErrNoNode {
 		t.Errorf("watch on missing node didn't return ErrNoNode: %v %v", current, changes)
 	}
@@ -81,17 +78,17 @@ func checkWatch(t *testing.T, ts *topo.Server) {
 	srvKeyspace := &topodatapb.SrvKeyspace{
 		ShardingColumnName: "user_id",
 	}
-	if err := ts.UpdateSrvKeyspace(ctx, LocalCellName, "test_keyspace", srvKeyspace); err != nil {
+	if err := ts.UpdateSrvKeyspace(ctx, cell, "test_keyspace", srvKeyspace); err != nil {
 		t.Fatalf("UpdateSrvKeyspace(1): %v", err)
 	}
 
 	// start watching again, it should work
-	changes, cancel = waitForInitialValue(t, conn, srvKeyspace)
+	changes, cancel = waitForInitialValue(t, ts, cell, srvKeyspace)
 	defer cancel()
 
 	// change the data
 	srvKeyspace.ShardingColumnName = "new_user_id"
-	if err := ts.UpdateSrvKeyspace(ctx, LocalCellName, "test_keyspace", srvKeyspace); err != nil {
+	if err := ts.UpdateSrvKeyspace(ctx, cell, "test_keyspace", srvKeyspace); err != nil {
 		t.Fatalf("UpdateSrvKeyspace(2): %v", err)
 	}
 
@@ -123,7 +120,7 @@ func checkWatch(t *testing.T, ts *topo.Server) {
 	}
 
 	// remove the SrvKeyspace
-	if err := ts.DeleteSrvKeyspace(ctx, LocalCellName, "test_keyspace"); err != nil {
+	if err := ts.DeleteSrvKeyspace(ctx, cell, "test_keyspace"); err != nil {
 		t.Fatalf("DeleteSrvKeyspace: %v", err)
 	}
 
@@ -161,23 +158,20 @@ func checkWatch(t *testing.T, ts *topo.Server) {
 }
 
 // checkWatchInterrupt tests we can interrupt a watch.
-func checkWatchInterrupt(t *testing.T, ts *topo.Server) {
+func checkWatchInterrupt(t *testing.T, ts topo.Impl) {
 	ctx := context.Background()
-	conn, err := ts.ConnForCell(ctx, LocalCellName)
-	if err != nil {
-		t.Fatalf("ConnForCell(test) failed: %v", err)
-	}
+	cell := getLocalCell(ctx, t, ts)
 
 	// create some data
 	srvKeyspace := &topodatapb.SrvKeyspace{
 		ShardingColumnName: "user_id",
 	}
-	if err := ts.UpdateSrvKeyspace(ctx, LocalCellName, "test_keyspace", srvKeyspace); err != nil {
+	if err := ts.UpdateSrvKeyspace(ctx, cell, "test_keyspace", srvKeyspace); err != nil {
 		t.Fatalf("UpdateSrvKeyspace(1): %v", err)
 	}
 
 	// Start watching, it should work.
-	changes, cancel := waitForInitialValue(t, conn, srvKeyspace)
+	changes, cancel := waitForInitialValue(t, ts, cell, srvKeyspace)
 
 	// Now cancel the watch.
 	cancel()

@@ -17,7 +17,6 @@ limitations under the License.
 package gateway
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -67,7 +66,7 @@ const (
     <td><a href="http://{{$status.Addr}}">{{$status.Name}}</a></td>
     <td>{{$status.QueryCount}}</td>
     <td>{{$status.QueryError}}</td>
-    <td>{{$status.FormattedQPS}}</td>
+    <td>{{$status.QPS}}</td>
     <td>{{$status.AvgLatency}}</td>
   </tr>
   {{end}}
@@ -135,14 +134,8 @@ type TabletCacheStatus struct {
 
 	QueryCount uint64
 	QueryError uint64
-	QPS        float64
+	QPS        uint64
 	AvgLatency float64 // in milliseconds
-}
-
-// FormattedQPS shows a 2 digit rounded value of QPS.
-// Used in the HTML template above.
-func (tcs *TabletCacheStatus) FormattedQPS() string {
-	return fmt.Sprintf("%.2f", tcs.QPS)
 }
 
 //
@@ -251,7 +244,7 @@ func (tsa *TabletStatusAggregator) GetCacheStatus() *TabletCacheStatus {
 	for _, d := range tsa.latencyInMinute {
 		totalLatency += d
 	}
-	status.QPS = float64(totalQuery) / 60
+	status.QPS = totalQuery / 60
 	if totalQuery > 0 {
 		status.AvgLatency = float64(totalLatency.Nanoseconds()) / float64(totalQuery) / 1000000
 	}

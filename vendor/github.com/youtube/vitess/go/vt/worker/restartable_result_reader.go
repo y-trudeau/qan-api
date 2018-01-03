@@ -27,9 +27,7 @@ import (
 
 	log "github.com/golang/glog"
 
-	"github.com/youtube/vitess/go/sqlescape"
 	"github.com/youtube/vitess/go/sqltypes"
-	"github.com/youtube/vitess/go/vt/grpcclient"
 	"github.com/youtube/vitess/go/vt/logutil"
 	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/vttablet/queryservice"
@@ -112,7 +110,7 @@ func (r *RestartableResultReader) getTablet() (bool, error) {
 	}
 
 	// Connect (dial) to the tablet.
-	conn, err := tabletconn.GetDialer()(tablet, grpcclient.FailFast(false))
+	conn, err := tabletconn.GetDialer()(tablet, *remoteActionsTimeout)
 	if err != nil {
 		return false /* retryable */, fmt.Errorf("failed to get dialer for tablet: %v", err)
 	}
@@ -266,7 +264,7 @@ func (r *RestartableResultReader) Close(ctx context.Context) {
 }
 
 func (r *RestartableResultReader) generateQuery() {
-	query := "SELECT " + strings.Join(escapeAll(r.td.Columns), ",") + " FROM " + sqlescape.EscapeID(r.td.Name)
+	query := "SELECT " + strings.Join(escapeAll(r.td.Columns), ",") + " FROM " + escape(r.td.Name)
 
 	// Build WHERE clauses.
 	var clauses []string
@@ -276,7 +274,7 @@ func (r *RestartableResultReader) generateQuery() {
 		// Initial query.
 		if !r.chunk.start.IsNull() {
 			var b bytes.Buffer
-			sqlescape.WriteEscapeID(&b, r.td.PrimaryKeyColumns[0])
+			writeEscaped(&b, r.td.PrimaryKeyColumns[0])
 			b.WriteString(">=")
 			r.chunk.start.EncodeSQL(&b)
 			clauses = append(clauses, b.String())
@@ -294,7 +292,7 @@ func (r *RestartableResultReader) generateQuery() {
 	// end value.
 	if !r.chunk.end.IsNull() {
 		var b bytes.Buffer
-		sqlescape.WriteEscapeID(&b, r.td.PrimaryKeyColumns[0])
+		writeEscaped(&b, r.td.PrimaryKeyColumns[0])
 		b.WriteString("<")
 		r.chunk.end.EncodeSQL(&b)
 		clauses = append(clauses, b.String())
@@ -335,7 +333,7 @@ func greaterThanTupleWhereClause(columns []string, row []sqltypes.Value) []strin
 	// Additional clause on the first column for multi-columns.
 	if len(columns) > 1 {
 		var b bytes.Buffer
-		sqlescape.WriteEscapeID(&b, columns[0])
+		writeEscaped(&b, columns[0])
 		b.WriteString(">=")
 		row[0].EncodeSQL(&b)
 		clauses = append(clauses, b.String())

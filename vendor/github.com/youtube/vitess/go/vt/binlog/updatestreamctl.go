@@ -27,6 +27,7 @@ import (
 	"github.com/youtube/vitess/go/stats"
 	"github.com/youtube/vitess/go/sync2"
 	"github.com/youtube/vitess/go/tb"
+	"github.com/youtube/vitess/go/vt/mysqlctl"
 	"github.com/youtube/vitess/go/vt/topo"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
 
@@ -105,10 +106,11 @@ func (m *UpdateStreamControlMock) IsEnabled() bool {
 // and UpdateStreamControl
 type UpdateStreamImpl struct {
 	// the following variables are set at construction time
-	ts       *topo.Server
+	ts       topo.Server
 	keyspace string
 	cell     string
-	cp       *mysql.ConnParams
+	mysqld   mysqlctl.MysqlDaemon
+	dbname   string
 	se       *schema.Engine
 
 	// actionLock protects the following variables
@@ -169,13 +171,14 @@ type RegisterUpdateStreamServiceFunc func(UpdateStream)
 var RegisterUpdateStreamServices []RegisterUpdateStreamServiceFunc
 
 // NewUpdateStream returns a new UpdateStreamImpl object
-func NewUpdateStream(ts *topo.Server, keyspace string, cell string, cp *mysql.ConnParams, se *schema.Engine) *UpdateStreamImpl {
+func NewUpdateStream(ts topo.Server, keyspace string, cell string, mysqld mysqlctl.MysqlDaemon, se *schema.Engine, dbname string) *UpdateStreamImpl {
 	return &UpdateStreamImpl{
 		ts:       ts,
 		keyspace: keyspace,
 		cell:     cell,
-		cp:       cp,
+		mysqld:   mysqld,
 		se:       se,
+		dbname:   dbname,
 	}
 }
 
@@ -210,7 +213,7 @@ func (updateStream *UpdateStreamImpl) Enable() {
 
 	updateStream.state.Set(usEnabled)
 	updateStream.streams.Init()
-	log.Infof("Enabling update stream, dbname: %s", updateStream.cp.DbName)
+	log.Infof("Enabling update stream, dbname: %s", updateStream.dbname)
 }
 
 // Disable will disallow any connection to the service
@@ -260,7 +263,7 @@ func (updateStream *UpdateStreamImpl) StreamKeyRange(ctx context.Context, positi
 		keyrangeTransactions.Add(1)
 		return callback(trans)
 	})
-	bls := NewStreamer(updateStream.cp, updateStream.se, charset, pos, 0, f)
+	bls := NewStreamer(updateStream.dbname, updateStream.mysqld, updateStream.se, charset, pos, 0, f)
 	bls.resolverFactory, err = newKeyspaceIDResolverFactory(ctx, updateStream.ts, updateStream.keyspace, updateStream.cell)
 	if err != nil {
 		return fmt.Errorf("newKeyspaceIDResolverFactory failed: %v", err)
@@ -300,7 +303,7 @@ func (updateStream *UpdateStreamImpl) StreamTables(ctx context.Context, position
 		tablesTransactions.Add(1)
 		return callback(trans)
 	})
-	bls := NewStreamer(updateStream.cp, updateStream.se, charset, pos, 0, f)
+	bls := NewStreamer(updateStream.dbname, updateStream.mysqld, updateStream.se, charset, pos, 0, f)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	i := updateStream.streams.Add(cancel)

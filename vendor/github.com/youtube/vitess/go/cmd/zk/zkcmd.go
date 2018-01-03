@@ -40,7 +40,7 @@ import (
 	"github.com/youtube/vitess/go/exit"
 	"github.com/youtube/vitess/go/vt/logutil"
 	"github.com/youtube/vitess/go/vt/topo/zk2topo"
-	"github.com/youtube/vitess/go/vt/vtctl"
+	"github.com/youtube/vitess/go/vt/vtctld"
 )
 
 var doc = `
@@ -107,7 +107,7 @@ const (
 type cmdFunc func(ctx context.Context, subFlags *flag.FlagSet, args []string) error
 
 var cmdMap map[string]cmdFunc
-var zconn *zk2topo.ZkConn
+var zconn zk2topo.Conn
 
 func init() {
 	cmdMap = map[string]cmdFunc{
@@ -149,7 +149,7 @@ func main() {
 	args = args[1:]
 	cmd, ok := cmdMap[cmdName]
 	if !ok {
-		log.Exitf("Unknown command %v", cmdName)
+		log.Fatalf("Unknown command %v", cmdName)
 	}
 	subFlags := flag.NewFlagSet(cmdName, flag.ExitOnError)
 
@@ -536,7 +536,7 @@ func cmdCat(ctx context.Context, subFlags *flag.FlagSet, args []string) error {
 		}
 		decoded := ""
 		if *decodeProto {
-			decoded, err = vtctl.DecodeContent(zkPath, data)
+			decoded, err = vtctld.DecodeContent(zkPath, data)
 			if err != nil {
 				log.Warningf("cat: cannot proto decode %v: %v", zkPath, err)
 				decoded = string(data)

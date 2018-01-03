@@ -18,6 +18,6 @@ from distutils.core import setup
 
 
 setup(name="vitess",
-      packages=["vtctl", "vtdb", "vtproto", "vttest", "util"],
+      packages=["vtctl", "vtdb", "vtproto", "vttest"],
       platforms="Any",
      )

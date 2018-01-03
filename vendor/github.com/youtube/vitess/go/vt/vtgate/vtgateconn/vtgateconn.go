@@ -19,6 +19,7 @@ package vtgateconn
 import (
 	"flag"
 	"fmt"
+	"time"
 
 	log "github.com/golang/glog"
 	"github.com/youtube/vitess/go/sqltypes"
@@ -49,7 +50,6 @@ func (conn *VTGateConn) Session(targetString string, options *querypb.ExecuteOpt
 		session: &vtgatepb.Session{
 			TargetString: targetString,
 			Options:      options,
-			Autocommit:   true,
 		},
 		impl: conn.impl,
 	}
@@ -384,7 +384,7 @@ type Impl interface {
 
 // DialerFunc represents a function that will return an Impl
 // object that can communicate with a VTGate.
-type DialerFunc func(ctx context.Context, address string) (Impl, error)
+type DialerFunc func(ctx context.Context, address string, timeout time.Duration) (Impl, error)
 
 var dialers = make(map[string]DialerFunc)
 
@@ -398,12 +398,12 @@ func RegisterDialer(name string, dialer DialerFunc) {
 }
 
 // DialProtocol dials a specific protocol, and returns the *VTGateConn
-func DialProtocol(ctx context.Context, protocol string, address string) (*VTGateConn, error) {
+func DialProtocol(ctx context.Context, protocol string, address string, timeout time.Duration) (*VTGateConn, error) {
 	dialer, ok := dialers[protocol]
 	if !ok {
 		return nil, fmt.Errorf("no dialer registered for VTGate protocol %s", protocol)
 	}
-	impl, err := dialer(ctx, address)
+	impl, err := dialer(ctx, address, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -414,6 +414,6 @@ func DialProtocol(ctx context.Context, protocol string, address string) (*VTGate
 
 // Dial dials using the command-line specified protocol, and returns
 // the *VTGateConn.
-func Dial(ctx context.Context, address string) (*VTGateConn, error) {
-	return DialProtocol(ctx, *VtgateProtocol, address)
+func Dial(ctx context.Context, address string, timeout time.Duration) (*VTGateConn, error) {
+	return DialProtocol(ctx, *VtgateProtocol, address, timeout)
 }

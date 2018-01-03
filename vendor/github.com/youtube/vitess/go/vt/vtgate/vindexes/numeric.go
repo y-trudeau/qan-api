@@ -71,8 +71,7 @@ func (*Numeric) Map(_ VCursor, ids []sqltypes.Value) ([][]byte, error) {
 	for _, id := range ids {
 		num, err := sqltypes.ToUint64(id)
 		if err != nil {
-			out = append(out, nil)
-			continue
+			return nil, fmt.Errorf("Numeric.Map: %v", err)
 		}
 		var keybytes [8]byte
 		binary.BigEndian.PutUint64(keybytes[:], num)

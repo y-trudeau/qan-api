@@ -125,9 +125,6 @@ func (rb *route) Join(rRoute *route, ajoin *sqlparser.JoinTableExpr) (builder, e
 	if rRoute.ERoute.Opcode == engine.SelectNext {
 		return nil, errors.New("unsupported: sequence join with another table")
 	}
-	if ajoin != nil && ajoin.Condition.Using != nil {
-		return nil, errors.New("unsupported: join with USING(column_list) clause")
-	}
 	if rb.ERoute.Keyspace.Name != rRoute.ERoute.Keyspace.Name {
 		return newJoin(rb, rRoute, ajoin)
 	}
@@ -151,7 +148,7 @@ func (rb *route) Join(rRoute *route, ajoin *sqlparser.JoinTableExpr) (builder, e
 	}
 
 	// Both route are sharded routes. Analyze join condition for merging.
-	for _, filter := range splitAndExpression(nil, ajoin.Condition.On) {
+	for _, filter := range splitAndExpression(nil, ajoin.On) {
 		if rb.isSameRoute(rRoute, filter) {
 			return rb.merge(rRoute, ajoin)
 		}
@@ -192,10 +189,7 @@ func (rb *route) merge(rhs *route, ajoin *sqlparser.JoinTableExpr) (builder, err
 	if ajoin == nil {
 		return rb, nil
 	}
-	if ajoin.Condition.Using != nil {
-		return nil, errors.New("unsupported: join with USING(column_list) clause")
-	}
-	for _, filter := range splitAndExpression(nil, ajoin.Condition.On) {
+	for _, filter := range splitAndExpression(nil, ajoin.On) {
 		// If VTGate evolves, this section should be rewritten
 		// to use processExpr.
 		_, err = findOrigin(filter, rb)
@@ -211,7 +205,6 @@ func (rb *route) merge(rhs *route, ajoin *sqlparser.JoinTableExpr) (builder, err
 // mergeable by unique vindex. The constraint has to be an equality
 // like a.id = b.id where both columns have the same unique vindex.
 func (rb *route) isSameRoute(rhs *route, filter sqlparser.Expr) bool {
-	filter = skipParenthesis(filter)
 	comparison, ok := filter.(*sqlparser.ComparisonExpr)
 	if !ok {
 		return false
@@ -448,11 +441,6 @@ func (rb *route) PushOrderBy(order *sqlparser.Order) error {
 // PushOrderByNull satisfies the builder interface.
 func (rb *route) PushOrderByNull() {
 	rb.Select.(*sqlparser.Select).OrderBy = sqlparser.OrderBy{&sqlparser.Order{Expr: &sqlparser.NullVal{}}}
-}
-
-// PushOrderByRand satisfies the builder interface.
-func (rb *route) PushOrderByRand() {
-	rb.Select.(*sqlparser.Select).OrderBy = sqlparser.OrderBy{&sqlparser.Order{Expr: &sqlparser.FuncExpr{Name: sqlparser.NewColIdent("rand")}}}
 }
 
 // SetLimit adds a LIMIT clause to the route.

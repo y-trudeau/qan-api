@@ -20,8 +20,9 @@ import (
 	"database/sql/driver"
 	"errors"
 
-	"github.com/youtube/vitess/go/sqltypes"
+	"golang.org/x/net/context"
 
+	"github.com/youtube/vitess/go/sqltypes"
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 )
 
@@ -33,13 +34,15 @@ type streamingRows struct {
 	fields  []*querypb.Field
 	qr      *sqltypes.Result
 	index   int
+	cancel  context.CancelFunc
 	convert *converter
 }
 
 // newStreamingRows creates a new streamingRows from stream.
-func newStreamingRows(stream sqltypes.ResultStream, conv *converter) driver.Rows {
+func newStreamingRows(stream sqltypes.ResultStream, cancel context.CancelFunc, conv *converter) driver.Rows {
 	return &streamingRows{
 		stream:  stream,
+		cancel:  cancel,
 		convert: conv,
 	}
 }
@@ -60,6 +63,9 @@ func (ri *streamingRows) Columns() []string {
 }
 
 func (ri *streamingRows) Close() error {
+	if ri.cancel != nil {
+		ri.cancel()
+	}
 	return nil
 }
 

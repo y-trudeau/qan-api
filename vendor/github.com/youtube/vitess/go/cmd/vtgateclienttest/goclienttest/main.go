@@ -18,6 +18,7 @@ package goclienttest
 
 import (
 	"testing"
+	"time"
 
 	"github.com/youtube/vitess/go/vt/vtgate/vtgateconn"
 	"golang.org/x/net/context"
@@ -37,7 +38,7 @@ const connectionKeyspace = "conn_ks"
 func TestGoClient(t *testing.T, protocol, addr string) {
 	// Create a client connecting to the server
 	ctx := context.Background()
-	conn, err := vtgateconn.DialProtocol(ctx, protocol, addr)
+	conn, err := vtgateconn.DialProtocol(ctx, protocol, addr, 30*time.Second)
 	session := conn.Session(connectionKeyspace, nil)
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)

@@ -50,7 +50,11 @@ done
 
 echo "Started zk servers."
 
-# Add the CellInfo description for the 'test' cell.
+# Now create the toplevel directories we'll need, if not there.
+$VTROOT/bin/zk -server $ZK_SERVER touch -p /vitess/global
+$VTROOT/bin/zk -server $ZK_SERVER touch -p /vitess/test
+
+# And also add the CellInfo description for the 'test' cell.
 # If the node already exists, it's fine, means we used existing data.
 $VTROOT/bin/vtctl $TOPOLOGY_FLAGS AddCellInfo \
   -root /vitess/test \

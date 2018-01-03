@@ -32,10 +32,6 @@ type MessageRow struct {
 	Epoch       int64
 	TimeCreated int64
 	Row         []sqltypes.Value
-
-	// defunct is set if the row was asked to be removed
-	// from cache.
-	defunct bool
 }
 
 type messageHeap []*MessageRow
@@ -69,35 +65,19 @@ func (mh *messageHeap) Pop() interface{} {
 
 //_______________________________________________
 
-// cache is the cache for the messager. Messages initially
-// start in the sendQueue. When they are popped, they move
-// to the inFlight set. They are eventually discarded
-// after being successfully sent. Messages can be discarded
-// early (while still in the send queue) by any kind of
-// update to a message (like an ack). If so, such messages
-// are marked as defunct in the cache, and are eventually
-// discarded when popped.
+// cache is the cache for the messager.
 type cache struct {
-	mu   sync.Mutex
-	size int
-
+	mu        sync.Mutex
+	size      int
 	sendQueue messageHeap
-	// inQueue is used to efficiently find items in sendQueue.
-	// The message id is the key.
-	inQueue map[string]*MessageRow
-
-	// inFlight are messages that are still being sent.
-	// They guard from such messages from being added back prematurely.
-	// The message id is the key.
-	inFlight map[string]bool
+	messages  map[string]*MessageRow
 }
 
 // NewMessagerCache creates a new cache.
 func newCache(size int) *cache {
 	mc := &cache{
 		size:     size,
-		inQueue:  make(map[string]*MessageRow),
-		inFlight: make(map[string]bool),
+		messages: make(map[string]*MessageRow),
 	}
 	return mc
 }
@@ -107,8 +87,7 @@ func (mc *cache) Clear() {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	mc.sendQueue = nil
-	mc.inQueue = make(map[string]*MessageRow)
-	mc.inFlight = make(map[string]bool)
+	mc.messages = make(map[string]*MessageRow)
 }
 
 // Add adds a MessageRow to the cache. It returns
@@ -120,14 +99,13 @@ func (mc *cache) Add(mr *MessageRow) bool {
 		return false
 	}
 	id := mr.Row[0].ToString()
-	if mc.inFlight[id] {
-		return true
-	}
-	if _, ok := mc.inQueue[id]; ok {
+	// Don't check for nil. Messages that are popped for
+	// send are nilled out.
+	if _, ok := mc.messages[id]; ok {
 		return true
 	}
 	heap.Push(&mc.sendQueue, mr)
-	mc.inQueue[id] = mr
+	mc.messages[id] = mr
 	return true
 }
 
@@ -145,16 +123,16 @@ func (mc *cache) Pop() *MessageRow {
 			return nil
 		}
 		mr := heap.Pop(&mc.sendQueue).(*MessageRow)
+		id := mr.Row[0].ToString()
 		// If message was previously marked as defunct, drop
 		// it and continue.
-		if mr.defunct {
+		if id == "" {
 			continue
 		}
-		id := mr.Row[0].ToString()
-
-		// Move the message from inQueue to inFlight.
-		delete(mc.inQueue, id)
-		mc.inFlight[id] = true
+		// Point the message entry to nil. If there is a race
+		// with Discard while the item is being sent, it won't
+		// be reachable.
+		mc.messages[id] = nil
 		return mr
 	}
 }
@@ -164,13 +142,12 @@ func (mc *cache) Discard(ids []string) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	for _, id := range ids {
-		if mr := mc.inQueue[id]; mr != nil {
+		if mr := mc.messages[id]; mr != nil {
 			// The row is still in the queue somewhere. Mark
 			// it as defunct. It will be "garbage collected" later.
-			mr.defunct = true
+			mr.Row[0] = sqltypes.NULL
 		}
-		delete(mc.inQueue, id)
-		delete(mc.inFlight, id)
+		delete(mc.messages, id)
 	}
 }
 

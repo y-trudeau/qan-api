@@ -17,26 +17,18 @@ limitations under the License.
 package grpcbinlogplayer
 
 import (
+	"time"
+
 	"golang.org/x/net/context"
 
 	"google.golang.org/grpc"
 
 	"github.com/youtube/vitess/go/netutil"
 	"github.com/youtube/vitess/go/vt/binlog/binlogplayer"
-	"github.com/youtube/vitess/go/vt/grpcclient"
-
-	"flag"
 
 	binlogdatapb "github.com/youtube/vitess/go/vt/proto/binlogdata"
 	binlogservicepb "github.com/youtube/vitess/go/vt/proto/binlogservice"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
-)
-
-var (
-	cert = flag.String("binlog_player_grpc_cert", "", "the cert to use to connect")
-	key  = flag.String("binlog_player_grpc_key", "", "the key to use to connect")
-	ca   = flag.String("binlog_player_grpc_ca", "", "the server ca to use to validate servers when connecting")
-	name = flag.String("binlog_player_grpc_server_name", "", "the server name to use to validate server certificate")
 )
 
 // client implements a Client over go rpc
@@ -45,14 +37,10 @@ type client struct {
 	c  binlogservicepb.UpdateStreamClient
 }
 
-func (client *client) Dial(tablet *topodatapb.Tablet) error {
+func (client *client) Dial(tablet *topodatapb.Tablet, connTimeout time.Duration) error {
 	addr := netutil.JoinHostPort(tablet.Hostname, tablet.PortMap["grpc"])
 	var err error
-	opt, err := grpcclient.SecureDialOption(*cert, *key, *ca, *name)
-	if err != nil {
-		return err
-	}
-	client.cc, err = grpcclient.Dial(addr, grpcclient.FailFast(false), opt)
+	client.cc, err = grpc.Dial(addr, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(connTimeout))
 	if err != nil {
 		return err
 	}

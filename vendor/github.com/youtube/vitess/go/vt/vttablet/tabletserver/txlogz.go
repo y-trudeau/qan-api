@@ -25,7 +25,6 @@ import (
 
 	log "github.com/golang/glog"
 	"github.com/youtube/vitess/go/acl"
-	"github.com/youtube/vitess/go/streamlog"
 	"github.com/youtube/vitess/go/vt/callerid"
 	"github.com/youtube/vitess/go/vt/logz"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
@@ -83,19 +82,6 @@ func init() {
 func txlogzHandler(w http.ResponseWriter, req *http.Request) {
 	if err := acl.CheckAccessHTTP(req, acl.DEBUGGING); err != nil {
 		acl.SendError(w, err)
-		return
-	}
-
-	if *streamlog.RedactDebugUIQueries {
-		io.WriteString(w, `
-<!DOCTYPE html>
-<html>
-<body>
-<h1>Redacted</h1>
-<p>/txlogz has been redacted for your protection</p>
-</body>
-</html>
-`)
 		return
 	}
 

@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/youtube/vitess/go/vt/dbconfigs"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/planbuilder"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
@@ -35,7 +34,7 @@ import (
 func TestQueryzHandler(t *testing.T) {
 	resp := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/schemaz", nil)
-	qe := newTestQueryEngine(100, 10*time.Second, true, dbconfigs.DBConfigs{})
+	qe := newTestQueryEngine(100, 10*time.Second, true)
 
 	plan1 := &TabletPlan{
 		Plan: &planbuilder.Plan{
@@ -45,7 +44,7 @@ func TestQueryzHandler(t *testing.T) {
 		},
 	}
 	plan1.AddStats(10, 2*time.Second, 1*time.Second, 2, 0)
-	qe.plans.Set("select name from test_table", plan1)
+	qe.queries.Set("select name from test_table", plan1)
 
 	plan2 := &TabletPlan{
 		Plan: &planbuilder.Plan{
@@ -55,7 +54,7 @@ func TestQueryzHandler(t *testing.T) {
 		},
 	}
 	plan2.AddStats(1, 2*time.Millisecond, 1*time.Millisecond, 1, 0)
-	qe.plans.Set("insert into test_table values 1", plan2)
+	qe.queries.Set("insert into test_table values 1", plan2)
 
 	plan3 := &TabletPlan{
 		Plan: &planbuilder.Plan{
@@ -65,8 +64,8 @@ func TestQueryzHandler(t *testing.T) {
 		},
 	}
 	plan3.AddStats(1, 75*time.Millisecond, 50*time.Millisecond, 1, 0)
-	qe.plans.Set("show tables", plan3)
-	qe.plans.Set("", (*TabletPlan)(nil))
+	qe.queries.Set("show tables", plan3)
+	qe.queries.Set("", (*TabletPlan)(nil))
 
 	plan4 := &TabletPlan{
 		Plan: &planbuilder.Plan{
@@ -80,8 +79,8 @@ func TestQueryzHandler(t *testing.T) {
 	for i := 1; i < 1000; i++ {
 		hugeInsert = hugeInsert + fmt.Sprintf(", %d", i)
 	}
-	qe.plans.Set(hugeInsert, plan4)
-	qe.plans.Set("", (*TabletPlan)(nil))
+	qe.queries.Set(hugeInsert, plan4)
+	qe.queries.Set("", (*TabletPlan)(nil))
 
 	queryzHandler(qe, resp, req)
 	body, _ := ioutil.ReadAll(resp.Body)

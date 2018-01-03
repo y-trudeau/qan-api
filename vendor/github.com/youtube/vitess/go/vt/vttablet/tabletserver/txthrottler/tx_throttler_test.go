@@ -17,6 +17,11 @@ limitations under the License.
 package txthrottler
 
 // Commands to generate the mocks for this test.
+//go:generate mockgen -destination mock_toposerver_impl_test.go -package txthrottler github.com/youtube/vitess/go/vt/topo Impl
+// We need the following to fix the generated mock_impl.go, since mockgen imports the 'context'
+// package from the wrong place.
+// TODO(mberlin): Remove the next line once we use the Go 1.7 package 'context' everywhere.
+//go:generate sed -i s,github.com/youtube/vitess/vendor/,,g mock_toposerver_impl_test.go
 //go:generate mockgen -destination mock_healthcheck_test.go -package txthrottler github.com/youtube/vitess/go/vt/discovery HealthCheck
 //go:generate mockgen -destination mock_throttler_test.go -package txthrottler github.com/youtube/vitess/go/vt/vttablet/tabletserver/txthrottler ThrottlerInterface
 //go:generate mockgen -destination mock_topology_watcher_test.go -package txthrottler github.com/youtube/vitess/go/vt/vttablet/tabletserver/txthrottler TopologyWatcherInterface
@@ -28,7 +33,6 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/youtube/vitess/go/vt/discovery"
 	"github.com/youtube/vitess/go/vt/topo"
-	"github.com/youtube/vitess/go/vt/topo/memorytopo"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
@@ -39,7 +43,7 @@ func TestDisabledThrottler(t *testing.T) {
 	oldConfig := tabletenv.Config
 	defer func() { tabletenv.Config = oldConfig }()
 	tabletenv.Config.EnableTxThrottler = false
-	throttler := CreateTxThrottlerFromTabletConfig(nil)
+	throttler := CreateTxThrottlerFromTabletConfig(topo.Server{})
 	if err := throttler.Open("keyspace", "shard"); err != nil {
 		t.Fatalf("want: nil, got: %v", err)
 	}
@@ -54,7 +58,7 @@ func TestEnabledThrottler(t *testing.T) {
 	defer mockCtrl.Finish()
 
 	defer resetTxThrottlerFactories()
-	ts := memorytopo.NewServer("cell1", "cell2")
+	mockTopoServer, _ := NewMockServer(mockCtrl)
 
 	mockHealthCheck := NewMockHealthCheck(mockCtrl)
 	var hcListener discovery.HealthCheckStatsListener
@@ -67,9 +71,9 @@ func TestEnabledThrottler(t *testing.T) {
 	hcCall2.After(hcCall1)
 	healthCheckFactory = func() discovery.HealthCheck { return mockHealthCheck }
 
-	topologyWatcherFactory = func(topoServer *topo.Server, tr discovery.TabletRecorder, cell, keyspace, shard string, refreshInterval time.Duration, topoReadConcurrency int) TopologyWatcherInterface {
-		if ts != topoServer {
-			t.Errorf("want: %v, got: %v", ts, topoServer)
+	topologyWatcherFactory = func(topoServer topo.Server, tr discovery.TabletRecorder, cell, keyspace, shard string, refreshInterval time.Duration, topoReadConcurrency int) TopologyWatcherInterface {
+		if mockTopoServer.Impl != topoServer.Impl {
+			t.Errorf("want: %v, got: %v", mockTopoServer, topoServer)
 		}
 		if cell != "cell1" && cell != "cell2" {
 			t.Errorf("want: cell1 or cell2, got: %v", cell)
@@ -115,7 +119,7 @@ func TestEnabledThrottler(t *testing.T) {
 	tabletenv.Config.EnableTxThrottler = true
 	tabletenv.Config.TxThrottlerHealthCheckCells = []string{"cell1", "cell2"}
 
-	throttler, err := tryCreateTxThrottler(ts)
+	throttler, err := tryCreateTxThrottler(mockTopoServer)
 	if err != nil {
 		t.Fatalf("want: nil, got: %v", err)
 	}

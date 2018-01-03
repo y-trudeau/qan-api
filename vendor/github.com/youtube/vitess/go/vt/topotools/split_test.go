@@ -43,7 +43,7 @@ func si(start, end string) *topo.ShardInfo {
 			Start: s,
 			End:   e,
 		},
-	}, nil)
+	}, 0)
 }
 
 type expectedOverlappingShard struct {

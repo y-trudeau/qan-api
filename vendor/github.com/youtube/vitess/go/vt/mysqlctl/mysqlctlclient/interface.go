@@ -21,12 +21,14 @@ package mysqlctlclient
 import (
 	"flag"
 	"fmt"
+	"time"
 
 	log "github.com/golang/glog"
 	"golang.org/x/net/context"
 )
 
 var protocol = flag.String("mysqlctl_client_protocol", "grpc", "the protocol to use to talk to the mysqlctl server")
+var connectionTimeout = flag.Duration("mysqlctl_client_connection_timeout", 30*time.Second, "the connection timeout to use to talk to the mysqlctl server")
 
 // MysqlctlClient defines the interface used to send remote mysqlctl commands
 type MysqlctlClient interface {
@@ -47,7 +49,7 @@ type MysqlctlClient interface {
 }
 
 // Factory functions are registered by client implementations.
-type Factory func(network, addr string) (MysqlctlClient, error)
+type Factory func(network, addr string, dialTimeout time.Duration) (MysqlctlClient, error)
 
 var factories = make(map[string]Factory)
 
@@ -65,5 +67,5 @@ func New(network, addr string) (MysqlctlClient, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown mysqlctl client protocol: %v", *protocol)
 	}
-	return factory(network, addr)
+	return factory(network, addr, *connectionTimeout)
 }

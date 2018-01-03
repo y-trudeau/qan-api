@@ -41,9 +41,6 @@ func decNesting(yylex interface{}) {
   yylex.(*Tokenizer).nesting--
 }
 
-// forceEOF forces the lexer to end prematurely. Not all SQL statements
-// are supported by the Parser, thus calling forceEOF will make the lexer
-// return EOF early.
 func forceEOF(yylex interface{}) {
   yylex.(*Tokenizer).ForceEOF = true
 }
@@ -64,11 +61,9 @@ func forceEOF(yylex interface{}) {
   selectExprs   SelectExprs
   selectExpr    SelectExpr
   columns       Columns
-  partitions    Partitions
   colName       *ColName
   tableExprs    TableExprs
   tableExpr     TableExpr
-  joinCondition JoinCondition
   tableName     TableName
   tableNames    TableNames
   indexHints    *IndexHints
@@ -87,6 +82,7 @@ func forceEOF(yylex interface{}) {
   updateExprs   UpdateExprs
   updateExpr    *UpdateExpr
   colIdent      ColIdent
+  colIdents     []ColIdent
   tableIdent    TableIdent
   convertType   *ConvertType
   aliasedTableName *AliasedTableExpr
@@ -108,12 +104,12 @@ func forceEOF(yylex interface{}) {
 %token LEX_ERROR
 %left <bytes> UNION
 %token <bytes> SELECT INSERT UPDATE DELETE FROM WHERE GROUP HAVING ORDER BY LIMIT OFFSET FOR
-%token <bytes> ALL DISTINCT AS EXISTS ASC DESC INTO DUPLICATE KEY DEFAULT SET LOCK KEYS
+%token <bytes> ALL DISTINCT AS EXISTS ASC DESC INTO DUPLICATE KEY DEFAULT SET LOCK
 %token <bytes> VALUES LAST_INSERT_ID
 %token <bytes> NEXT VALUE SHARE MODE
 %token <bytes> SQL_NO_CACHE SQL_CACHE
 %left <bytes> JOIN STRAIGHT_JOIN LEFT RIGHT INNER OUTER CROSS NATURAL USE FORCE
-%left <bytes> ON USING
+%left <bytes> ON
 %token <empty> '(' ',' ')'
 %token <bytes> ID HEX STRING INTEGRAL FLOAT HEXNUM VALUE_ARG LIST_ARG COMMENT COMMENT_KEYWORD BIT_LITERAL
 %token <bytes> NULL TRUE FALSE
@@ -135,7 +131,7 @@ func forceEOF(yylex interface{}) {
 %left <bytes> '^'
 %right <bytes> '~' UNARY
 %left <bytes> COLLATE
-%right <bytes> BINARY UNDERSCORE_BINARY
+%right <bytes> BINARY
 %right <bytes> INTERVAL
 %nonassoc <bytes> '.'
 
@@ -146,9 +142,9 @@ func forceEOF(yylex interface{}) {
 
 // DDL Tokens
 %token <bytes> CREATE ALTER DROP RENAME ANALYZE
-%token <bytes> TABLE INDEX VIEW TO IGNORE IF UNIQUE PRIMARY
+%token <bytes> TABLE INDEX VIEW TO IGNORE IF UNIQUE USING PRIMARY
 %token <bytes> SHOW DESCRIBE EXPLAIN DATE ESCAPE REPAIR OPTIMIZE TRUNCATE
-%token <bytes> MAXVALUE PARTITION REORGANIZE LESS THAN PROCEDURE TRIGGER
+%token <bytes> MAXVALUE PARTITION REORGANIZE LESS THAN
 
 // Type Tokens
 %token <bytes> BIT TINYINT SMALLINT MEDIUMINT INT INTEGER BIGINT INTNUM
@@ -184,7 +180,7 @@ func forceEOF(yylex interface{}) {
 %type <statement> command
 %type <selStmt> select_statement base_select union_lhs union_rhs
 %type <statement> insert_statement update_statement delete_statement set_statement
-%type <statement> create_statement alter_statement rename_statement drop_statement truncate_statement
+%type <statement> create_statement alter_statement rename_statement drop_statement
 %type <ddl> create_table_prefix
 %type <statement> analyze_statement show_statement use_statement other_statement
 %type <bytes2> comment_opt comment_list
@@ -196,12 +192,12 @@ func forceEOF(yylex interface{}) {
 %type <expr> expression
 %type <tableExprs> from_opt table_references
 %type <tableExpr> table_reference table_factor join_table
-%type <joinCondition> join_condition join_condition_opt on_expression_opt
 %type <tableNames> table_name_list
-%type <str> inner_join outer_join straight_join natural_join
+%type <str> inner_join outer_join natural_join
 %type <tableName> table_name into_table_name
 %type <aliasedTableName> aliased_table_name
 %type <indexHints> index_hint_list
+%type <colIdents> index_list
 %type <expr> where_expression_opt
 %type <expr> condition
 %type <boolVal> boolean_value
@@ -227,8 +223,7 @@ func forceEOF(yylex interface{}) {
 %type <str> asc_desc_opt
 %type <limit> limit_opt
 %type <str> lock_opt
-%type <columns> ins_column_list using_column_list
-%type <partitions> opt_partition_clause partition_list
+%type <columns> ins_column_list
 %type <updateExprs> on_dup_opt
 %type <updateExprs> update_list
 %type <bytes> charset_or_character_set
@@ -244,9 +239,10 @@ func forceEOF(yylex interface{}) {
 %type <empty> force_eof ddl_force_eof
 %type <str> charset
 %type <convertType> convert_type
+%type <str> show_statement_type
 %type <columnType> column_type
 %type <columnType> int_type decimal_type numeric_type time_type char_type
-%type <optVal> length_opt column_default_opt column_comment_opt on_update_opt
+%type <optVal> length_opt column_default_opt column_comment_opt
 %type <str> charset_opt collate_opt
 %type <boolVal> unsigned_opt zero_fill_opt
 %type <LengthScaleOption> float_length_opt decimal_length_opt
@@ -292,7 +288,6 @@ command:
 | alter_statement
 | rename_statement
 | drop_statement
-| truncate_statement
 | analyze_statement
 | show_statement
 | use_statement
@@ -345,27 +340,26 @@ union_rhs:
 
 
 insert_statement:
-  insert_or_replace comment_opt ignore_opt into_table_name opt_partition_clause insert_data on_dup_opt
+  insert_or_replace comment_opt ignore_opt into_table_name insert_data on_dup_opt
   {
     // insert_data returns a *Insert pre-filled with Columns & Values
-    ins := $6
+    ins := $5
     ins.Action = $1
     ins.Comments = $2
     ins.Ignore = $3
     ins.Table = $4
-    ins.Partitions = $5
-    ins.OnDup = OnDup($7)
+    ins.OnDup = OnDup($6)
     $$ = ins
   }
-| insert_or_replace comment_opt ignore_opt into_table_name opt_partition_clause SET update_list on_dup_opt
+| insert_or_replace comment_opt ignore_opt into_table_name SET update_list on_dup_opt
   {
-    cols := make(Columns, 0, len($7))
-    vals := make(ValTuple, 0, len($8))
-    for _, updateList := range $7 {
+    cols := make(Columns, 0, len($6))
+    vals := make(ValTuple, 0, len($7))
+    for _, updateList := range $6 {
       cols = append(cols, updateList.Name.Name)
       vals = append(vals, updateList.Expr)
     }
-    $$ = &Insert{Action: $1, Comments: Comments($2), Ignore: $3, Table: $4, Partitions: $5, Columns: cols, Rows: Values{vals}, OnDup: OnDup($8)}
+    $$ = &Insert{Action: $1, Comments: Comments($2), Ignore: $3, Table: $4, Columns: cols, Rows: Values{vals}, OnDup: OnDup($7)}
   }
 
 insert_or_replace:
@@ -385,9 +379,9 @@ update_statement:
   }
 
 delete_statement:
-  DELETE comment_opt FROM table_name opt_partition_clause where_expression_opt order_by_opt limit_opt
+  DELETE comment_opt FROM table_name where_expression_opt order_by_opt limit_opt
   {
-    $$ = &Delete{Comments: Comments($2), TableExprs:  TableExprs{&AliasedTableExpr{Expr:$4}}, Partitions: $5, Where: NewWhere(WhereStr, $6), OrderBy: $7, Limit: $8}
+    $$ = &Delete{Comments: Comments($2), TableExprs:  TableExprs{&AliasedTableExpr{Expr:$4}}, Where: NewWhere(WhereStr, $5), OrderBy: $6, Limit: $7}
   }
 | DELETE comment_opt table_name_list from_or_using table_references where_expression_opt
   {
@@ -406,15 +400,6 @@ table_name_list:
 | table_name_list ',' table_name
   {
     $$ = append($$, $3)
-  }
-
-opt_partition_clause:
-  {
-    $$ = nil
-  }
-| PARTITION openb partition_list closeb
-  {
-  $$ = $3
   }
 
 set_statement:
@@ -492,14 +477,13 @@ table_column_list:
   }
 
 column_definition:
-  ID column_type null_opt column_default_opt on_update_opt auto_increment_opt column_key_opt column_comment_opt
+  ID column_type null_opt column_default_opt auto_increment_opt column_key_opt column_comment_opt
   {
     $2.NotNull = $3
     $2.Default = $4
-    $2.OnUpdate = $5
-    $2.Autoincrement = $6
-    $2.KeyOpt = $7
-    $2.Comment = $8
+    $2.Autoincrement = $5
+    $2.KeyOpt = $6
+    $2.Comment = $7
     $$ = &ColumnDefinition{Name: NewColIdent(string($1)), Type: $2}
   }
 column_type:
@@ -767,19 +751,6 @@ column_default_opt:
   {
     $$ = NewValArg($2)
   }
-| DEFAULT CURRENT_TIMESTAMP
-  {
-    $$ = NewValArg($2)
-  }
-
-on_update_opt:
-  {
-    $$ = nil
-  }
-| ON UPDATE CURRENT_TIMESTAMP
-{
-  $$ = NewValArg($3)
-}
 
 auto_increment_opt:
   {
@@ -1000,7 +971,7 @@ drop_statement:
     }
     $$ = &DDL{Action: DropStr, Table: $4, IfExists: exists}
   }
-| DROP INDEX ID ON table_name ddl_force_eof
+| DROP INDEX ID ON table_name
   {
     // Change this to an alter statement
     $$ = &DDL{Action: AlterStr, Table: $5, NewName: $5}
@@ -1014,100 +985,40 @@ drop_statement:
     $$ = &DDL{Action: DropStr, Table: $4.ToViewName(), IfExists: exists}
   }
 
-truncate_statement:
-  TRUNCATE TABLE table_name
-  {
-    $$ = &DDL{Action: TruncateStr, Table: $3}
-  }
-| TRUNCATE table_name
-  {
-    $$ = &DDL{Action: TruncateStr, Table: $2}
-  }
 analyze_statement:
   ANALYZE TABLE table_name
   {
     $$ = &DDL{Action: AlterStr, Table: $3, NewName: $3}
   }
 
+show_statement_type:
+  ID
+  {
+    $$ = ShowUnsupportedStr
+  }
+| reserved_keyword
+  {
+    switch v := string($1); v {
+    case ShowDatabasesStr, ShowTablesStr:
+      $$ = v
+    default:
+      $$ = ShowUnsupportedStr
+    }
+  }
+| non_reserved_keyword
+{
+    switch v := string($1); v {
+    case ShowKeyspacesStr, ShowShardsStr, ShowVSchemaTablesStr:
+      $$ = v
+    default:
+      $$ = ShowUnsupportedStr
+    }
+}
+
 show_statement:
-  SHOW BINARY ID ddl_force_eof /* SHOW BINARY LOGS */
+  SHOW show_statement_type force_eof
   {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-| SHOW CHARACTER SET ddl_force_eof
-  {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-| SHOW CREATE DATABASE ddl_force_eof
-  {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-/* Rule to handle SHOW CREATE EVENT, SHOW CREATE FUNCTION, etc. */
-| SHOW CREATE ID ddl_force_eof
-  {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-| SHOW CREATE PROCEDURE ddl_force_eof
-  {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-| SHOW CREATE TABLE ddl_force_eof
-  {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-| SHOW CREATE TRIGGER ddl_force_eof
-  {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-| SHOW CREATE VIEW ddl_force_eof
-  {
-    $$ = &Show{Type: string($2) + " " + string($3)}
-  }
-| SHOW DATABASES ddl_force_eof
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW INDEX ddl_force_eof
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW KEYS ddl_force_eof
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW PROCEDURE ddl_force_eof
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW TABLE ddl_force_eof
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW TABLES ddl_force_eof
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW VITESS_KEYSPACES
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW VITESS_SHARDS
-  {
-    $$ = &Show{Type: string($2)}
-  }
-| SHOW VSCHEMA_TABLES
-  {
-    $$ = &Show{Type: string($2)}
-  }
-/*
- * Catch-all for show statements without vitess keywords:
- *
- *  SHOW BINARY LOGS
- *  SHOW INVALID
- */
-| SHOW ID ddl_force_eof
-  {
-    $$ = &Show{Type: string($2)}
+    $$ = &Show{Type: $2}
   }
 
 use_statement:
@@ -1138,6 +1049,10 @@ other_statement:
     $$ = &OtherAdmin{}
   }
 | OPTIMIZE force_eof
+  {
+    $$ = &OtherAdmin{}
+  }
+| TRUNCATE force_eof
   {
     $$ = &OtherAdmin{}
   }
@@ -1305,30 +1220,6 @@ table_name as_opt_id index_hint_list
   {
     $$ = &AliasedTableExpr{Expr:$1, As: $2, Hints: $3}
   }
-| table_name PARTITION openb partition_list closeb as_opt_id index_hint_list
-  {
-    $$ = &AliasedTableExpr{Expr:$1, Partitions: $4, As: $6, Hints: $7}
-  }
-
-using_column_list:
-  sql_id
-  {
-    $$ = Columns{$1}
-  }
-| using_column_list ',' sql_id
-  {
-    $$ = append($$, $3)
-  }
-
-partition_list:
-  sql_id
-  {
-    $$ = Partitions{$1}
-  }
-| partition_list ',' sql_id
-  {
-    $$ = append($$, $3)
-  }
 
 // There is a grammar conflict here:
 // 1: INSERT INTO a SELECT * FROM b JOIN c ON b.i = c.i
@@ -1338,40 +1229,22 @@ partition_list:
 // first construct, which automatically makes the second construct a
 // syntax error. This is the same behavior as MySQL.
 join_table:
-  table_reference inner_join table_factor join_condition_opt
+  table_reference inner_join table_factor %prec JOIN
   {
-    $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3, Condition: $4}
+    $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3}
   }
-| table_reference straight_join table_factor on_expression_opt
+| table_reference inner_join table_factor ON expression
   {
-    $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3, Condition: $4}
+    $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3, On: $5}
   }
-| table_reference outer_join table_reference join_condition
+| table_reference outer_join table_reference ON expression
   {
-    $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3, Condition: $4}
+    $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3, On: $5}
   }
 | table_reference natural_join table_factor
   {
     $$ = &JoinTableExpr{LeftExpr: $1, Join: $2, RightExpr: $3}
   }
-
-join_condition:
-  ON expression
-  { $$ = JoinCondition{On: $2} }
-| USING '(' using_column_list ')'
-  { $$ = JoinCondition{Using: $3} }
-
-join_condition_opt:
-%prec JOIN
-  { }
-| join_condition
-  { $$ = $1 }
-
-on_expression_opt:
-%prec JOIN
-  { }
-| ON expression
-  { $$ = JoinCondition{On: $2} }
 
 as_opt:
   { $$ = struct{}{} }
@@ -1411,9 +1284,7 @@ inner_join:
   {
     $$ = JoinStr
   }
-
-straight_join:
-  STRAIGHT_JOIN
+| STRAIGHT_JOIN
   {
     $$ = StraightJoinStr
   }
@@ -1474,17 +1345,27 @@ index_hint_list:
   {
     $$ = nil
   }
-| USE INDEX openb using_column_list closeb
+| USE INDEX openb index_list closeb
   {
     $$ = &IndexHints{Type: UseStr, Indexes: $4}
   }
-| IGNORE INDEX openb using_column_list closeb
+| IGNORE INDEX openb index_list closeb
   {
     $$ = &IndexHints{Type: IgnoreStr, Indexes: $4}
   }
-| FORCE INDEX openb using_column_list closeb
+| FORCE INDEX openb index_list closeb
   {
     $$ = &IndexHints{Type: ForceStr, Indexes: $4}
+  }
+
+index_list:
+  sql_id
+  {
+    $$ = []ColIdent{$1}
+  }
+| index_list ',' sql_id
+  {
+    $$ = append($1, $3)
   }
 
 where_expression_opt:
@@ -1768,10 +1649,6 @@ value_expression:
   {
     $$ = &UnaryExpr{Operator: BinaryStr, Expr: $2}
   }
-| UNDERSCORE_BINARY value_expression %prec UNARY
-  {
-    $$ = &UnaryExpr{Operator: UBinaryStr, Expr: $2}
-  }
 | '+'  value_expression %prec UNARY
   {
     if num, ok := $2.(*SQLVal); ok && num.Type == IntVal {
@@ -1808,7 +1685,7 @@ value_expression:
     // as a function. If support is needed for that,
     // we'll need to revisit this. The solution
     // will be non-trivial because of grammar conflicts.
-    $$ = &IntervalExpr{Expr: $2, Unit: $3.String()}
+    $$ = &IntervalExpr{Expr: $2, Unit: $3}
   }
 | function_call_generic
 | function_call_keyword
@@ -2570,7 +2447,6 @@ non_reserved_keyword:
 | INT
 | INTEGER
 | JSON
-| KEYS
 | LANGUAGE
 | LAST_INSERT_ID
 | LESS
@@ -2587,7 +2463,6 @@ non_reserved_keyword:
 | OPTIMIZE
 | PARTITION
 | PRIMARY
-| PROCEDURE
 | QUERY
 | REAL
 | REORGANIZE
@@ -2602,7 +2477,7 @@ non_reserved_keyword:
 | TINYBLOB
 | TINYINT
 | TINYTEXT
-| TRIGGER
+| TRUNCATE
 | UNSIGNED
 | UNUSED
 | VARBINARY

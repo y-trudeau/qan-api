@@ -17,7 +17,6 @@ limitations under the License.
 package schemamanager
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -26,8 +25,6 @@ import (
 	"github.com/youtube/vitess/go/vt/logutil"
 	"github.com/youtube/vitess/go/vt/mysqlctl/tmutils"
 	tabletmanagerdatapb "github.com/youtube/vitess/go/vt/proto/tabletmanagerdata"
-	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
-	"github.com/youtube/vitess/go/vt/topo/memorytopo"
 	"github.com/youtube/vitess/go/vt/wrangler"
 )
 
@@ -36,7 +33,7 @@ var (
 )
 
 func TestTabletExecutorOpen(t *testing.T) {
-	executor := newFakeExecutor(t)
+	executor := newFakeExecutor()
 	ctx := context.Background()
 
 	if err := executor.Open(ctx, "test_keyspace"); err != nil {
@@ -51,26 +48,14 @@ func TestTabletExecutorOpen(t *testing.T) {
 }
 
 func TestTabletExecutorOpenWithEmptyMasterAlias(t *testing.T) {
-	ctx := context.Background()
-	ts := memorytopo.NewServer("test_cell")
-	wr := wrangler.New(logutil.NewConsoleLogger(), ts, newFakeTabletManagerClient())
-	tablet := &topodatapb.Tablet{
-		Alias: &topodatapb.TabletAlias{
-			Cell: "test_cell",
-			Uid:  1,
-		},
-		Keyspace: "test_keyspace",
-		Shard:    "0",
-		Type:     topodatapb.TabletType_REPLICA,
-	}
-	// This will create the Keyspace, Shard and Tablet record.
-	// Since this is a replica tablet, the Shard will have no master.
-	if err := wr.InitTablet(ctx, tablet, false /*allowMasterOverride*/, true /*createShardAndKeyspace*/, false /*allowUpdate*/); err != nil {
-		t.Fatalf("InitTablet failed: %v", err)
-	}
+	ft := newFakeTopo()
+	ft.Impl.(*fakeTopo).WithEmptyMasterAlias = true
+	wr := wrangler.New(logutil.NewConsoleLogger(), ft, newFakeTabletManagerClient())
 	executor := NewTabletExecutor(wr, testWaitSlaveTimeout)
-	if err := executor.Open(ctx, "test_keyspace"); err == nil || !strings.Contains(err.Error(), "does not have a master") {
-		t.Fatalf("executor.Open() = '%v', want error", err)
+	ctx := context.Background()
+
+	if err := executor.Open(ctx, "test_keyspace"); err == nil {
+		t.Fatalf("executor.Open() = nil, want error")
 	}
 	executor.Close()
 }
@@ -101,7 +86,7 @@ func TestTabletExecutorValidate(t *testing.T) {
 		},
 	})
 
-	wr := wrangler.New(logutil.NewConsoleLogger(), newFakeTopo(t), fakeTmc)
+	wr := wrangler.New(logutil.NewConsoleLogger(), newFakeTopo(), fakeTmc)
 	executor := NewTabletExecutor(wr, testWaitSlaveTimeout)
 	ctx := context.Background()
 
@@ -143,12 +128,6 @@ func TestTabletExecutorValidate(t *testing.T) {
 	}
 
 	if err := executor.Validate(ctx, []string{
-		"TRUNCATE TABLE test_table_04",
-	}); err != nil {
-		t.Fatalf("executor.Validate should succeed, drop a table with more than 2,000,000 rows is allowed")
-	}
-
-	if err := executor.Validate(ctx, []string{
 		"DROP TABLE test_table_04",
 	}); err != nil {
 		t.Fatalf("executor.Validate should succeed, drop a table with more than 2,000,000 rows is allowed")
@@ -171,7 +150,7 @@ func TestTabletExecutorValidate(t *testing.T) {
 }
 
 func TestTabletExecutorExecute(t *testing.T) {
-	executor := newFakeExecutor(t)
+	executor := newFakeExecutor()
 	ctx := context.Background()
 
 	sqls := []string{"DROP TABLE unknown_table"}
@@ -183,7 +162,7 @@ func TestTabletExecutorExecute(t *testing.T) {
 }
 
 func TestTabletExecutorExecute_PreflightWithoutChangesIsAnError(t *testing.T) {
-	executor := newFakeExecutor(t)
+	executor := newFakeExecutor()
 	ctx := context.Background()
 	executor.Open(ctx, "test_keyspace")
 	defer executor.Close()

@@ -33,7 +33,6 @@ import (
 	"github.com/youtube/vitess/go/vt/topo"
 	"github.com/youtube/vitess/go/vt/vtctl"
 	"github.com/youtube/vitess/go/vt/vttablet/tmclient"
-	"github.com/youtube/vitess/go/vt/workflow"
 	"github.com/youtube/vitess/go/vt/wrangler"
 	"golang.org/x/net/context"
 )
@@ -96,8 +95,6 @@ func main() {
 
 	ts := topo.Open()
 	defer ts.Close()
-
-	vtctl.WorkflowManager = workflow.NewManager(ts)
 
 	ctx, cancel := context.WithTimeout(context.Background(), *waitTime)
 	wr := wrangler.New(logutil.NewConsoleLogger(), ts, tmclient.NewTabletManagerClient())

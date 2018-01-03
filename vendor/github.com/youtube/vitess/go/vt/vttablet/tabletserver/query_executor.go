@@ -448,7 +448,7 @@ func (qre *QueryExecutor) execNextval() (*sqltypes.Result, error) {
 				return nil, fmt.Errorf("invalid cache value for sequence %s: %d", tableName, cache)
 			}
 			newLast := nextID + cache
-			for newLast < t.SequenceInfo.NextVal+inc {
+			for newLast <= t.SequenceInfo.NextVal+inc {
 				newLast += cache
 			}
 			query = fmt.Sprintf("update %s set next_id = %d where id = 0", sqlparser.String(tableName), newLast)
@@ -526,26 +526,6 @@ func (qre *QueryExecutor) execInsertMessage(conn *TxConnection) (*sqltypes.Resul
 	qr, err := qre.execInsertPKRows(conn, nil, pkRows)
 	if err != nil {
 		return nil, err
-	}
-
-	// If an auto-inc value was generated, it could be the id column.
-	// If so, we have to populate it.
-	if qr.InsertID != 0 {
-		id := int64(qr.InsertID)
-		idPKIndex := qre.plan.Table.MessageInfo.IDPKIndex
-		for _, row := range pkRows {
-			if !row[idPKIndex].IsNull() {
-				// If a value was supplied, either it was not the auto-inc column
-				// or values were partially supplied for an auto-inc column.
-				// If it's the former, there is nothing more to do.
-				// If it's the latter, we cannot predict the values for subsequent
-				// rows. So, we still break out of this loop, and will rely on
-				// the poller to eventually pick up the rows from the database.
-				break
-			}
-			row[idPKIndex] = sqltypes.NewInt64(id)
-			id++
-		}
 	}
 
 	// Re-read the inserted rows to prime the cache.

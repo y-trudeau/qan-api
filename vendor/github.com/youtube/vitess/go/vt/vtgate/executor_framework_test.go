@@ -17,13 +17,7 @@ limitations under the License.
 package vtgate
 
 import (
-	"fmt"
-	"strconv"
-	"strings"
-	"testing"
-
 	"github.com/youtube/vitess/go/sqltypes"
-	"github.com/youtube/vitess/go/streamlog"
 	"github.com/youtube/vitess/go/vt/discovery"
 	"github.com/youtube/vitess/go/vt/vttablet/sandboxconn"
 	"golang.org/x/net/context"
@@ -36,7 +30,7 @@ var executorVSchema = `
 {
 	"sharded": true,
 	"vindexes": {
-		"hash_index": {
+		"user_index": {
 			"type": "hash"
 		},
 		"music_user_map": {
@@ -55,15 +49,6 @@ var executorVSchema = `
 				"table": "name_user_map",
 				"from": "name",
 				"to": "user_id"
-			}
-		},
-		"name_lastname_keyspace_id_map": {
-			"type": "lookup",
-			"owner": "user2",
-			"params": {
-				"table": "name_lastname_keyspace_id_map",
-				"from": "name,lastname",
-				"to": "keyspace_id"
 			}
 		},
 		"insert_ignore_idx": {
@@ -91,7 +76,7 @@ var executorVSchema = `
 			"column_vindexes": [
 				{
 					"column": "Id",
-					"name": "hash_index"
+					"name": "user_index"
 				},
 				{
 					"column": "name",
@@ -103,23 +88,11 @@ var executorVSchema = `
 				"sequence": "user_seq"
 			}
 		},
-		"user2": {
-			"column_vindexes": [
-				{
-					"column": "id",
-					"name": "hash_index"
-				},
-				{
-					"columns": ["name", "lastname"],
-					"name": "name_lastname_keyspace_id_map"
-				}
-			]
-		},
 		"user_extra": {
 			"column_vindexes": [
 				{
 					"column": "user_id",
-					"name": "hash_index"
+					"name": "user_index"
 				}
 			]
 		},
@@ -127,7 +100,7 @@ var executorVSchema = `
 			"column_vindexes": [
 				{
 					"column": "user_id",
-					"name": "hash_index"
+					"name": "user_index"
 				},
 				{
 					"column": "id",
@@ -143,7 +116,7 @@ var executorVSchema = `
 			"column_vindexes": [
 				{
 					"column": "user_id",
-					"name": "hash_index"
+					"name": "user_index"
 				},
 				{
 					"column": "music_id",
@@ -159,7 +132,7 @@ var executorVSchema = `
 				},
 				{
 					"column": "user_id",
-					"name": "hash_index"
+					"name": "user_index"
 				}
 			]
 		},
@@ -175,7 +148,7 @@ var executorVSchema = `
 				},
 				{
 					"column": "verify",
-					"name": "hash_index"
+					"name": "user_index"
 				}
 			]
 		},
@@ -216,7 +189,6 @@ var unshardedVSchema = `
 		},
 		"music_user_map": {},
 		"name_user_map": {},
-		"name_lastname_keyspace_id_map": {},
 		"ins_lookup": {},
 		"main1": {
 			"auto_increment": {
@@ -230,7 +202,6 @@ var unshardedVSchema = `
 `
 
 const testBufferSize = 10
-const testCacheSize = int64(10)
 
 func createExecutorEnv() (executor *Executor, sbc1, sbc2, sbclookup *sandboxconn.SandboxConn) {
 	cell := "aa"
@@ -259,14 +230,12 @@ func createExecutorEnv() (executor *Executor, sbc1, sbc2, sbclookup *sandboxconn
 
 	getSandbox(KsTestUnsharded).VSchema = unshardedVSchema
 
-	executor = NewExecutor(context.Background(), serv, cell, "", resolver, false, testBufferSize, testCacheSize, false)
+	executor = NewExecutor(context.Background(), serv, cell, "", resolver, false, testBufferSize)
 	return executor, sbc1, sbc2, sbclookup
 }
 
 func executorExec(executor *Executor, sql string, bv map[string]*querypb.BindVariable) (*sqltypes.Result, error) {
-	return executor.Execute(
-		context.Background(),
-		"TestExecute",
+	return executor.Execute(context.Background(),
 		masterSession,
 		sql,
 		bv)
@@ -276,7 +245,6 @@ func executorStream(executor *Executor, sql string) (qr *sqltypes.Result, err er
 	results := make(chan *sqltypes.Result, 100)
 	err = executor.StreamExecute(
 		context.Background(),
-		"TestExecuteStream",
 		masterSession,
 		sql,
 		nil,
@@ -301,93 +269,4 @@ func executorStream(executor *Executor, sql string) (qr *sqltypes.Result, err er
 		qr.Rows = append(qr.Rows, r.Rows...)
 	}
 	return qr, nil
-}
-
-func testNonZeroDuration(t *testing.T, what, d string) {
-	t.Helper()
-	time, _ := strconv.ParseFloat(d, 64)
-	if time == 0 {
-		t.Errorf("querylog %s want non-zero duration got %s (%v)", what, d, time)
-	}
-}
-
-func getQueryLog(logChan chan interface{}) *LogStats {
-	var log interface{}
-
-	select {
-	case log = <-logChan:
-		return log.(*LogStats)
-	default:
-		return nil
-	}
-}
-
-// Queries can hit the plan cache in less than a microsecond, which makes them
-// appear to take 0.000000 time in the query log. To mitigate this in tests,
-// keep an in-memory record of queries that we know have been planned during
-// the current test execution and skip testing for non-zero plan time if this
-// is a repeat query.
-var testPlannedQueries = map[string]bool{}
-
-func testQueryLog(t *testing.T, logChan chan interface{}, method, stmtType, sql string, shardQueries int) *LogStats {
-	t.Helper()
-
-	logStats := getQueryLog(logChan)
-	if logStats == nil {
-		t.Errorf("logstats: no querylog in channel, want sql %s", sql)
-		return nil
-	}
-
-	log := streamlog.GetFormatter(QueryLogger)(nil, logStats)
-	fields := strings.Split(log, "\t")
-
-	// fields[0] is the method
-	if method != fields[0] {
-		t.Errorf("logstats: method want %q got %q", method, fields[0])
-	}
-
-	// fields[1] - fields[6] are the caller id, start/end times, etc
-
-	// only test the durations if there is no error (fields[16])
-	if fields[16] == "\"\"" {
-		// fields[7] is the total execution time
-		testNonZeroDuration(t, "TotalTime", fields[7])
-
-		// fields[8] is the planner time. keep track of the planned queries to
-		// avoid the case where we hit the plan in cache and it takes less than
-		// a microsecond to plan it
-		if testPlannedQueries[sql] == false {
-			testNonZeroDuration(t, "PlanTime", fields[8])
-		}
-		testPlannedQueries[sql] = true
-
-		// fields[9] is ExecuteTime which is not set for certain statements SET,
-		// BEGIN, COMMIT, ROLLBACK, etc
-		if stmtType != "BEGIN" && stmtType != "COMMIT" && stmtType != "ROLLBACK" && stmtType != "SET" {
-			testNonZeroDuration(t, "ExecuteTime", fields[9])
-		}
-
-		// fields[10] is CommitTime which is set only in autocommit mode and
-		// tested separately
-	}
-
-	// fields[11] is the statement type
-	if stmtType != fields[11] {
-		t.Errorf("logstats: stmtType want %q got %q", stmtType, fields[11])
-	}
-
-	// fields[12] is the original sql
-	wantSQL := fmt.Sprintf("%q", sql)
-	if wantSQL != fields[12] {
-		t.Errorf("logstats: SQL want %s got %s", wantSQL, fields[12])
-	}
-
-	// fields[13] contains the formatted bind vars
-
-	// fields[14] is the count of shard queries
-	if fmt.Sprintf("%v", shardQueries) != fields[14] {
-		t.Errorf("logstats: ShardQueries want %v got %v", shardQueries, fields[14])
-	}
-
-	return logStats
 }

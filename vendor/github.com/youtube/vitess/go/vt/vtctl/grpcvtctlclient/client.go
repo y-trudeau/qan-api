@@ -18,10 +18,8 @@ limitations under the License.
 package grpcvtctlclient
 
 import (
-	"flag"
 	"time"
 
-	"github.com/youtube/vitess/go/vt/grpcclient"
 	"github.com/youtube/vitess/go/vt/logutil"
 	"github.com/youtube/vitess/go/vt/vtctl/vtctlclient"
 	"golang.org/x/net/context"
@@ -32,25 +30,14 @@ import (
 	vtctlservicepb "github.com/youtube/vitess/go/vt/proto/vtctlservice"
 )
 
-var (
-	cert = flag.String("vtctld_grpc_cert", "", "the cert to use to connect")
-	key  = flag.String("vtctld_grpc_key", "", "the key to use to connect")
-	ca   = flag.String("vtctld_grpc_ca", "", "the server ca to use to validate servers when connecting")
-	name = flag.String("vtctld_grpc_server_name", "", "the server name to use to validate server certificate")
-)
-
 type gRPCVtctlClient struct {
 	cc *grpc.ClientConn
 	c  vtctlservicepb.VtctlClient
 }
 
-func gRPCVtctlClientFactory(addr string) (vtctlclient.VtctlClient, error) {
-	opt, err := grpcclient.SecureDialOption(*cert, *key, *ca, *name)
-	if err != nil {
-		return nil, err
-	}
+func gRPCVtctlClientFactory(addr string, dialTimeout time.Duration) (vtctlclient.VtctlClient, error) {
 	// create the RPC client
-	cc, err := grpcclient.Dial(addr, grpcclient.FailFast(false), opt)
+	cc, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(dialTimeout))
 	if err != nil {
 		return nil, err
 	}

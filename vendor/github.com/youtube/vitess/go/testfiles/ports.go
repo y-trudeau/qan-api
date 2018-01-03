@@ -43,9 +43,17 @@ var (
 	// Takes three ports.
 	GoVtTopoZk2topoPort = GoVtTopoEtcd2topoPort + 2
 
+	// GoVtTabletserverCustomruleZkcustomrulePort is used by the go/vt/tabletserver/customrule/zkcustomrule package.
+	// Takes three ports.
+	GoVtTabletserverCustomruleZkcustomrulePort = GoVtTopoZk2topoPort + 3
+
+	// GoVtEtcdtopoPort is used by the go/vt/etcdtopo package.
+	// Takes two ports.
+	GoVtEtcdtopoPort = GoVtTabletserverCustomruleZkcustomrulePort + 3
+
 	// GoVtTopoConsultopoPort is used by the go/vt/topo/consultopo package.
 	// Takes five ports.
-	GoVtTopoConsultopoPort = GoVtTopoZk2topoPort + 3
+	GoVtTopoConsultopoPort = GoVtEtcdtopoPort + 2
 )
 
 //
@@ -55,6 +63,10 @@ var (
 var (
 	// GoVtTopoZk2topoZkID is used by the go/vt/topo/zk2topo package.
 	GoVtTopoZk2topoZkID = 1
+
+	// GoVtTabletserverCustomruleZkcustomruleZkID is used by the
+	// go/vt/tabletserver/customrule/zkcustomrule package.
+	GoVtTabletserverCustomruleZkcustomruleZkID = 2
 )
 
 func getPortStart() int {

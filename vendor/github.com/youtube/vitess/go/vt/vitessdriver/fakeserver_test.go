@@ -266,7 +266,6 @@ var execMap = map[string]struct {
 			},
 			Session: &vtgatepb.Session{
 				TargetString: "@rdonly",
-				Autocommit:   true,
 			},
 		},
 		result:  &result1,
@@ -280,7 +279,6 @@ var execMap = map[string]struct {
 			},
 			Session: &vtgatepb.Session{
 				TargetString: "@rdonly",
-				Autocommit:   true,
 			},
 		},
 		result:  &result2,
@@ -302,7 +300,6 @@ var execMap = map[string]struct {
 			SQL: "begin",
 			Session: &vtgatepb.Session{
 				TargetString: "@master",
-				Autocommit:   true,
 			},
 		},
 		result:  &sqltypes.Result{},
@@ -316,7 +313,6 @@ var execMap = map[string]struct {
 		result: &sqltypes.Result{},
 		session: &vtgatepb.Session{
 			TargetString: "@master",
-			Autocommit:   true,
 		},
 	},
 	"rollback": {

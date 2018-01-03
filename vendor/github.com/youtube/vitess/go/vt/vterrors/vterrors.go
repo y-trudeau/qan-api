@@ -18,11 +18,16 @@ package vterrors
 
 import (
 	"fmt"
+	"time"
 
 	"golang.org/x/net/context"
 
+	"github.com/youtube/vitess/go/tb"
+	"github.com/youtube/vitess/go/vt/logutil"
 	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
 )
+
+var logger = logutil.NewThrottledLogger("vterror", 5*time.Second)
 
 type vtError struct {
 	code vtrpcpb.Code
@@ -32,7 +37,8 @@ type vtError struct {
 // New creates a new error using the code and input string.
 func New(code vtrpcpb.Code, in string) error {
 	if code == vtrpcpb.Code_OK {
-		panic("OK is an invalid error code; use INTERNAL instead")
+		logger.Errorf("OK is an invalid code, using INTERNAL instead: %s\n%s", in, tb.Stack(2))
+		code = vtrpcpb.Code_INTERNAL
 	}
 	return &vtError{
 		code: code,

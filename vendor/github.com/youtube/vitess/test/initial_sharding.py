@@ -240,12 +240,9 @@ index by_msg (msg)
     for t in [shard_master, shard_replica, shard_rdonly1]:
       t.create_db('vt_test_keyspace')
 
-    shard_master.start_vttablet(wait_for_state=None,
-                                binlog_use_v3_resharding_mode=False)
-    shard_replica.start_vttablet(wait_for_state=None,
-                                binlog_use_v3_resharding_mode=False)
-    shard_rdonly1.start_vttablet(wait_for_state=None,
-                                binlog_use_v3_resharding_mode=False)
+    shard_master.start_vttablet(wait_for_state=None)
+    shard_replica.start_vttablet(wait_for_state=None)
+    shard_rdonly1.start_vttablet(wait_for_state=None)
 
     for t in [shard_master, shard_replica, shard_rdonly1]:
       t.wait_for_vttablet_state('NOT_SERVING')
@@ -347,8 +344,7 @@ index by_msg (msg)
     for t in [shard_0_master, shard_0_replica, shard_0_rdonly1,
               shard_1_master, shard_1_replica, shard_1_rdonly1]:
       t.create_db('vt_test_keyspace')
-      t.start_vttablet(wait_for_state=None,
-                       binlog_use_v3_resharding_mode=False)
+      t.start_vttablet(wait_for_state=None)
 
     for t in [shard_0_master, shard_0_replica, shard_0_rdonly1,
               shard_1_master, shard_1_replica, shard_1_rdonly1]:
@@ -464,8 +460,7 @@ index by_msg (msg)
 
     # Run vtworker as daemon for the following SplitClone commands.
     worker_proc, worker_port, worker_rpc_port = utils.run_vtworker_bg(
-        ['--cell', 'test_nj', '--command_display_interval', '10ms',
-          '--use_v3_resharding_mode=false'],
+        ['--cell', 'test_nj', '--command_display_interval', '10ms'],
         auto_log=True)
 
     # Initial clone (online).
@@ -554,17 +549,13 @@ index by_msg (msg)
     logging.debug('Running vtworker SplitDiff for -80')
     for t in [shard_0_rdonly1, shard_1_rdonly1]:
       utils.run_vtctl(['RunHealthCheck', t.tablet_alias])
-    utils.run_vtworker(['-cell', 'test_nj',
-                        '--use_v3_resharding_mode=false',
-                        'SplitDiff',
+    utils.run_vtworker(['-cell', 'test_nj', 'SplitDiff',
                         '--min_healthy_rdonly_tablets', '1',
                         'test_keyspace/-80'],
                        auto_log=True)
 
     logging.debug('Running vtworker SplitDiff for 80-')
-    utils.run_vtworker(['-cell', 'test_nj',
-                        '--use_v3_resharding_mode=false',
-                        'SplitDiff',
+    utils.run_vtworker(['-cell', 'test_nj', 'SplitDiff',
                         '--min_healthy_rdonly_tablets', '1',
                         'test_keyspace/80-'],
                        auto_log=True)

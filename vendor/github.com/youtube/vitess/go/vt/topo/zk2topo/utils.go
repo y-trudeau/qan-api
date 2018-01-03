@@ -33,9 +33,8 @@ import (
 // CreateRecursive is a helper function on top of Create. It will
 // create a path and any pieces required, think mkdir -p.
 // Intermediate znodes are always created empty.
-// Pass maxCreationDepth=-1 to create all nodes to the top.
-func CreateRecursive(ctx context.Context, conn *ZkConn, zkPath string, value []byte, flags int32, aclv []zk.ACL, maxCreationDepth int) (string, error) {
-	pathCreated, err := conn.Create(ctx, zkPath, value, flags, aclv)
+func CreateRecursive(ctx context.Context, conn Conn, zkPath string, value []byte, flags int32, aclv []zk.ACL, maxCreationDepth int) (pathCreated string, err error) {
+	pathCreated, err = conn.Create(ctx, zkPath, value, flags, aclv)
 	if err == zk.ErrNoNode {
 		if maxCreationDepth == 0 {
 			return "", zk.ErrNoNode
@@ -55,12 +54,12 @@ func CreateRecursive(ctx context.Context, conn *ZkConn, zkPath string, value []b
 		}
 		pathCreated, err = conn.Create(ctx, zkPath, value, flags, aclv)
 	}
-	return pathCreated, err
+	return
 }
 
 // ChildrenRecursive returns the relative path of all the children of
 // the provided node.
-func ChildrenRecursive(ctx context.Context, zconn *ZkConn, zkPath string) ([]string, error) {
+func ChildrenRecursive(ctx context.Context, zconn Conn, zkPath string) ([]string, error) {
 	var err error
 	mutex := sync.Mutex{}
 	wg := sync.WaitGroup{}
@@ -113,7 +112,7 @@ func ChildrenRecursive(ctx context.Context, zconn *ZkConn, zkPath string) ([]str
 //
 // If you send paths that don't contain any wildcard and
 // don't exist, this function will return an empty array.
-func ResolveWildcards(ctx context.Context, zconn *ZkConn, zkPaths []string) ([]string, error) {
+func ResolveWildcards(ctx context.Context, zconn Conn, zkPaths []string) ([]string, error) {
 	results := make([][]string, len(zkPaths))
 	wg := &sync.WaitGroup{}
 	mu := &sync.Mutex{}
@@ -155,7 +154,7 @@ func ResolveWildcards(ctx context.Context, zconn *ZkConn, zkPaths []string) ([]s
 	return result, nil
 }
 
-func resolveRecursive(ctx context.Context, zconn *ZkConn, parts []string, toplevel bool) ([]string, error) {
+func resolveRecursive(ctx context.Context, zconn Conn, parts []string, toplevel bool) ([]string, error) {
 	for i, part := range parts {
 		if fileutil.HasWildcard(part) {
 			var children []string
@@ -251,7 +250,7 @@ func resolveRecursive(ctx context.Context, zconn *ZkConn, parts []string, toplev
 }
 
 // DeleteRecursive will delete all children of the given path.
-func DeleteRecursive(ctx context.Context, zconn *ZkConn, zkPath string, version int32) error {
+func DeleteRecursive(ctx context.Context, zconn Conn, zkPath string, version int32) error {
 	// version: -1 delete any version of the node at path - only applies to the top node
 	err := zconn.Delete(ctx, zkPath, version)
 	if err == nil {
@@ -289,7 +288,7 @@ func DeleteRecursive(ctx context.Context, zconn *ZkConn, zkPath string, version 
 // path holds the lock.  Call this queue-lock because the semantics are
 // a hybrid.  Normal Zookeeper locks make assumptions about sequential
 // numbering that don't hold when the data in a lock is modified.
-func obtainQueueLock(ctx context.Context, conn *ZkConn, zkPath string) error {
+func obtainQueueLock(ctx context.Context, conn Conn, zkPath string) error {
 	queueNode := path.Dir(zkPath)
 	lockNode := path.Base(zkPath)
 

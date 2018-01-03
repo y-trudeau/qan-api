@@ -80,19 +80,16 @@ func TestLookupHashMap(t *testing.T) {
 		sqltypes.MakeTestFields("a", "varbinary"),
 		"notint",
 	)
-	got, err = lookuphash.(NonUnique).Map(vc, []sqltypes.Value{sqltypes.NewInt64(1)})
-	if err != nil {
-		t.Error(err)
-	}
-	want = [][][]byte{{}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Map(): %#v, want %#v", got, want)
+	_, err = lookuphash.(NonUnique).Map(vc, []sqltypes.Value{sqltypes.NewInt64(1)})
+	wantErr := "lookupHash.Map.ToUint64: could not parse value: notint"
+	if err == nil || err.Error() != wantErr {
+		t.Errorf("lookuphash(query fail) err: %v, want %s", err, wantErr)
 	}
 
 	// Test query fail.
 	vc.mustFail = true
 	_, err = lookuphash.(NonUnique).Map(vc, []sqltypes.Value{sqltypes.NewInt64(1)})
-	wantErr := "lookup.Map: execute failed"
+	wantErr = "lookup.Map: execute failed"
 	if err == nil || err.Error() != wantErr {
 		t.Errorf("lookuphash(query fail) err: %v, want %s", err, wantErr)
 	}
@@ -133,7 +130,7 @@ func TestLookupHashVerify(t *testing.T) {
 
 func TestLookupHashCreate(t *testing.T) {
 	vc := &vcursor{}
-	err := lookuphash.(Lookup).Create(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6")}, false /* ignoreMode */)
+	err := lookuphash.(Lookup).Create(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6")}, false /* ignoreMode */)
 	if err != nil {
 		t.Error(err)
 	}
@@ -141,7 +138,7 @@ func TestLookupHashCreate(t *testing.T) {
 		t.Errorf("vc.queries length: %v, want %v", got, want)
 	}
 
-	err = lookuphash.(Lookup).Create(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, [][]byte{[]byte("bogus")}, false /* ignoreMode */)
+	err = lookuphash.(Lookup).Create(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, [][]byte{[]byte("bogus")}, false /* ignoreMode */)
 	want := "lookup.Create.vunhash: invalid keyspace id: 626f677573"
 	if err == nil || err.Error() != want {
 		t.Errorf("lookuphash.Create(bogus) err: %v, want %s", err, want)
@@ -150,7 +147,7 @@ func TestLookupHashCreate(t *testing.T) {
 
 func TestLookupHashDelete(t *testing.T) {
 	vc := &vcursor{}
-	err := lookuphash.(Lookup).Delete(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, []byte("\x16k@\xb4J\xbaK\xd6"))
+	err := lookuphash.(Lookup).Delete(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, []byte("\x16k@\xb4J\xbaK\xd6"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -158,7 +155,7 @@ func TestLookupHashDelete(t *testing.T) {
 		t.Errorf("vc.queries length: %v, want %v", got, want)
 	}
 
-	err = lookuphash.(Lookup).Delete(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, []byte("bogus"))
+	err = lookuphash.(Lookup).Delete(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, []byte("bogus"))
 	want := "lookup.Delete.vunhash: invalid keyspace id: 626f677573"
 	if err == nil || err.Error() != want {
 		t.Errorf("lookuphash.Delete(bogus) err: %v, want %s", err, want)

@@ -75,13 +75,10 @@ func TestLookupHashUniqueMap(t *testing.T) {
 		sqltypes.MakeTestFields("a", "varbinary"),
 		"notint",
 	)
-	got, err = lhu.(Unique).Map(vc, []sqltypes.Value{sqltypes.NewInt64(1)})
-	if err != nil {
-		t.Error(err)
-	}
-	want = [][]byte{nil}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Map(): %#v, want %+v", got, want)
+	_, err = lhu.(Unique).Map(vc, []sqltypes.Value{sqltypes.NewInt64(1)})
+	wantErr = "LookupHash.Map: could not parse value: notint"
+	if err == nil || err.Error() != wantErr {
+		t.Errorf("lhu(query fail) err: %v, want %s", err, wantErr)
 	}
 
 	// Test query fail.
@@ -128,7 +125,7 @@ func TestLookupHashUniqueVerify(t *testing.T) {
 
 func TestLookupHashUniqueCreate(t *testing.T) {
 	vc := &vcursor{}
-	err := lhu.(Lookup).Create(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6")}, false /* ignoreMode */)
+	err := lhu.(Lookup).Create(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6")}, false /* ignoreMode */)
 	if err != nil {
 		t.Error(err)
 	}
@@ -136,7 +133,7 @@ func TestLookupHashUniqueCreate(t *testing.T) {
 		t.Errorf("vc.queries length: %v, want %v", got, want)
 	}
 
-	err = lhu.(Lookup).Create(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, [][]byte{[]byte("bogus")}, false /* ignoreMode */)
+	err = lhu.(Lookup).Create(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, [][]byte{[]byte("bogus")}, false /* ignoreMode */)
 	want := "lookup.Create.vunhash: invalid keyspace id: 626f677573"
 	if err == nil || err.Error() != want {
 		t.Errorf("lhu.Create(bogus) err: %v, want %s", err, want)
@@ -145,7 +142,7 @@ func TestLookupHashUniqueCreate(t *testing.T) {
 
 func TestLookupHashUniqueDelete(t *testing.T) {
 	vc := &vcursor{}
-	err := lhu.(Lookup).Delete(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, []byte("\x16k@\xb4J\xbaK\xd6"))
+	err := lhu.(Lookup).Delete(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, []byte("\x16k@\xb4J\xbaK\xd6"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -153,7 +150,7 @@ func TestLookupHashUniqueDelete(t *testing.T) {
 		t.Errorf("vc.queries length: %v, want %v", got, want)
 	}
 
-	err = lhu.(Lookup).Delete(vc, [][]sqltypes.Value{[]sqltypes.Value{sqltypes.NewInt64(1)}}, []byte("bogus"))
+	err = lhu.(Lookup).Delete(vc, []sqltypes.Value{sqltypes.NewInt64(1)}, []byte("bogus"))
 	want := "lookup.Delete.vunhash: invalid keyspace id: 626f677573"
 	if err == nil || err.Error() != want {
 		t.Errorf("lhu.Delete(bogus) err: %v, want %s", err, want)

@@ -18,9 +18,11 @@ package binlogplayer
 
 import (
 	"flag"
+	"time"
+
+	"golang.org/x/net/context"
 
 	log "github.com/golang/glog"
-	"golang.org/x/net/context"
 
 	binlogdatapb "github.com/youtube/vitess/go/vt/proto/binlogdata"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
@@ -43,7 +45,7 @@ type BinlogTransactionStream interface {
 // Client is the interface all clients must satisfy
 type Client interface {
 	// Dial a server
-	Dial(tablet *topodatapb.Tablet) error
+	Dial(tablet *topodatapb.Tablet, connTimeout time.Duration) error
 
 	// Close the connection
 	Close()

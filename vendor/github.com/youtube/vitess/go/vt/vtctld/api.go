@@ -121,7 +121,16 @@ func unmarshalRequest(r *http.Request, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
-func initAPI(ctx context.Context, ts *topo.Server, actions *ActionRepository, realtimeStats *realtimeStats) {
+func addSrvkeyspace(ctx context.Context, ts topo.Server, cell, keyspace string, srvKeyspaces map[string]interface{}) error {
+	srvKeyspace, err := ts.GetSrvKeyspace(ctx, cell, keyspace)
+	if err != nil {
+		return fmt.Errorf("invalid keyspace name: %q ", keyspace)
+	}
+	srvKeyspaces[keyspace] = srvKeyspace
+	return nil
+}
+
+func initAPI(ctx context.Context, ts topo.Server, actions *ActionRepository, realtimeStats *realtimeStats) {
 	tabletHealthCache := newTabletHealthCache(ts)
 	tmClient := tmclient.NewTabletManagerClient()
 
@@ -240,16 +249,10 @@ func initAPI(ctx context.Context, ts *topo.Server, actions *ActionRepository, re
 			return nil, fmt.Errorf("can't get list of SrvKeyspaceNames for cell %q: GetSrvKeyspaceNames returned: %v", cell, err)
 		}
 		for _, keyspaceName := range keyspaceNamesList {
-			srvKeyspace, err := ts.GetSrvKeyspace(ctx, cell, keyspaceName)
+			err := addSrvkeyspace(ctx, ts, cell, keyspaceName, srvKeyspaces)
 			if err != nil {
-				// If a keyspace is in the process of being set up, it exists
-				// in the list of keyspaces but GetSrvKeyspace fails.
-				//
-				// Instead of returning this error, simply skip it in the
-				// loop so we still return the other valid keyspaces.
-				continue
+				return nil, err
 			}
-			srvKeyspaces[keyspaceName] = srvKeyspace
 		}
 		return srvKeyspaces, nil
 

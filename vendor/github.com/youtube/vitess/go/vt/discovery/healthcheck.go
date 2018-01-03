@@ -37,30 +37,28 @@ limitations under the License.
 package discovery
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"html/template"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	log "github.com/golang/glog"
-	"golang.org/x/net/context"
+	"bytes"
+	"encoding/json"
+	"net/http"
 
+	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 	"github.com/youtube/vitess/go/netutil"
 	"github.com/youtube/vitess/go/stats"
-	"github.com/youtube/vitess/go/vt/grpcclient"
+	querypb "github.com/youtube/vitess/go/vt/proto/query"
+	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/topotools"
 	"github.com/youtube/vitess/go/vt/vttablet/queryservice"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletconn"
-
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
-	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -71,8 +69,9 @@ var (
 
 // See the documentation for NewHealthCheck below for an explanation of these parameters.
 const (
-	DefaultHealthCheckRetryDelay = 5 * time.Second
-	DefaultHealthCheckTimeout    = 1 * time.Minute
+	DefaultHealthCheckConnTimeout = 1 * time.Minute
+	DefaultHealthCheckRetryDelay  = 5 * time.Second
+	DefaultHealthCheckTimeout     = 1 * time.Minute
 )
 
 const (
@@ -258,6 +257,7 @@ type HealthCheckImpl struct {
 	// Immutable fields set at construction time.
 	listener           HealthCheckStatsListener
 	sendDownEvents     bool
+	connTimeout        time.Duration
 	retryDelay         time.Duration
 	healthCheckTimeout time.Duration
 	closeChan          chan struct{} // signals the process gorouting to terminate
@@ -278,11 +278,15 @@ type HealthCheckImpl struct {
 
 // NewDefaultHealthCheck creates a new HealthCheck object with a default configuration.
 func NewDefaultHealthCheck() HealthCheck {
-	return NewHealthCheck(DefaultHealthCheckRetryDelay, DefaultHealthCheckTimeout)
+	return NewHealthCheck(
+		DefaultHealthCheckConnTimeout, DefaultHealthCheckRetryDelay, DefaultHealthCheckTimeout)
 }
 
 // NewHealthCheck creates a new HealthCheck object.
 // Parameters:
+// connTimeout.
+//   The duration to wait until a health-check streaming connection is up.
+//   0 means it should establish the connection in the background and return immediately.
 // retryDelay.
 //   The duration to wait before retrying to connect (e.g. after a failed connection
 //   attempt).
@@ -290,9 +294,10 @@ func NewDefaultHealthCheck() HealthCheck {
 //   The duration for which we consider a health check response to be 'fresh'. If we don't get
 //   a health check response from a tablet for more than this duration, we consider the tablet
 //   not healthy.
-func NewHealthCheck(retryDelay, healthCheckTimeout time.Duration) HealthCheck {
+func NewHealthCheck(connTimeout, retryDelay, healthCheckTimeout time.Duration) HealthCheck {
 	hc := &HealthCheckImpl{
 		addrToConns:        make(map[string]*healthCheckConn),
+		connTimeout:        connTimeout,
 		retryDelay:         retryDelay,
 		healthCheckTimeout: healthCheckTimeout,
 		closeChan:          make(chan struct{}),
@@ -403,7 +408,6 @@ func (hc *HealthCheckImpl) checkConn(hcc *healthCheckConn, name string) {
 	}
 	hc.initialUpdatesWG.Done()
 
-	retryDelay := hc.retryDelay
 	for {
 		ctx, cancel := context.WithCancel(hcc.ctx)
 		hcc.mu.Lock()
@@ -412,8 +416,6 @@ func (hc *HealthCheckImpl) checkConn(hcc *healthCheckConn, name string) {
 
 		// Read stream health responses.
 		hcc.stream(ctx, hc, func(shr *querypb.StreamHealthResponse) error {
-			// We received a message. Reset the back-off.
-			retryDelay = hc.retryDelay
 			return hcc.processResponse(hc, shr)
 		})
 
@@ -422,9 +424,7 @@ func (hc *HealthCheckImpl) checkConn(hcc *healthCheckConn, name string) {
 		select {
 		case <-hcc.ctx.Done():
 			return
-		case <-time.After(retryDelay):
-			// Exponentially back-off to prevent tight-loop.
-			retryDelay *= 2
+		case <-time.After(hc.retryDelay):
 		}
 	}
 }
@@ -437,7 +437,7 @@ func (hcc *healthCheckConn) stream(ctx context.Context, hc *HealthCheckImpl, cal
 
 	if conn == nil {
 		var err error
-		conn, err = tabletconn.GetDialer()(hcc.tabletStats.Tablet, grpcclient.FailFast(true))
+		conn, err = tabletconn.GetDialer()(hcc.tabletStats.Tablet, hc.connTimeout)
 		if err != nil {
 			hcc.mu.Lock()
 			hcc.tabletStats.LastError = err
@@ -515,12 +515,6 @@ func (hcc *healthCheckConn) processResponse(hc *HealthCheckImpl, shr *querypb.St
 		if oldTs.Target.TabletType != topodatapb.TabletType_MASTER && shr.Target.TabletType == topodatapb.TabletType_MASTER {
 			hcMasterPromotedCounters.Add([]string{shr.Target.Keyspace, shr.Target.Shard}, 1)
 		}
-	}
-
-	// In this case where a new tablet is initialized or a tablet type changes, we want to
-	// initialize the counter so the rate can be calculated correctly.
-	if hcc.tabletStats.Target.TabletType != shr.Target.TabletType {
-		hcErrorCounters.Add([]string{shr.Target.Keyspace, shr.Target.Shard, topoproto.TabletTypeLString(shr.Target.TabletType)}, 0)
 	}
 
 	// Update our record, and notify downstream for tabletType and

@@ -55,8 +55,8 @@ func TestLocalControllerOpen(t *testing.T) {
 	controller := NewLocalController("")
 	ctx := context.Background()
 
-	if err := controller.Open(ctx); err == nil || !strings.Contains(err.Error(), "no such file or directory") {
-		t.Fatalf("Open should fail, no such dir, but got: %v", err)
+	if err := controller.Open(ctx); err == nil {
+		t.Fatalf("Open should fail, no such dir")
 	}
 
 	schemaChangeDir, err := ioutil.TempDir("", "localcontroller-test")

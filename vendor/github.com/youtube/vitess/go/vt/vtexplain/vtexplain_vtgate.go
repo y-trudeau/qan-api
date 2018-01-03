@@ -22,19 +22,18 @@ package vtexplain
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	log "github.com/golang/glog"
 	"golang.org/x/net/context"
 
+	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/discovery"
 	"github.com/youtube/vitess/go/vt/key"
 	"github.com/youtube/vitess/go/vt/topo"
 	"github.com/youtube/vitess/go/vt/vtgate"
 	"github.com/youtube/vitess/go/vt/vtgate/engine"
 	"github.com/youtube/vitess/go/vt/vtgate/gateway"
-
-	"github.com/youtube/vitess/go/vt/vttablet/queryservice"
+	"github.com/youtube/vitess/go/vt/vttablet/sandboxconn"
 
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 	vschemapb "github.com/youtube/vitess/go/vt/proto/vschema"
@@ -64,14 +63,13 @@ func initVtgateExecutor(vSchemaStr string, opts *Options) error {
 	}
 
 	streamSize := 10
-	queryPlanCacheSize := int64(10)
-	vtgateExecutor = vtgate.NewExecutor(context.Background(), explainTopo, vtexplainCell, "", resolver, opts.Normalize, streamSize, queryPlanCacheSize, false /* legacyAutocommit */)
+	vtgateExecutor = vtgate.NewExecutor(context.Background(), explainTopo, vtexplainCell, "", resolver, opts.Normalize, streamSize)
 
 	return nil
 }
 
 func newFakeResolver(hc discovery.HealthCheck, serv topo.SrvTopoServer, cell string) *vtgate.Resolver {
-	gw := gateway.GetCreator()(hc, nil, serv, cell, 3)
+	gw := gateway.GetCreator()(hc, topo.Server{}, serv, cell, 3)
 	gw.WaitForTablets(context.Background(), []topodatapb.TabletType{topodatapb.TabletType_REPLICA})
 	tc := vtgate.NewTxConn(gw, vtgatepb.TransactionMode_MULTI)
 	sc := vtgate.NewScatterConn("", tc, gw)
@@ -88,7 +86,7 @@ func buildTopology(vschemaStr string, numShardsPerKeyspace int) error {
 		return err
 	}
 
-	explainTopo.TabletConns = make(map[string]*explainTablet)
+	explainTopo.TabletConns = make(map[string]*sandboxconn.SandboxConn)
 	for ks, vschema := range explainTopo.Keyspaces {
 		numShards := 1
 		if vschema.Sharded {
@@ -102,11 +100,12 @@ func buildTopology(vschemaStr string, numShardsPerKeyspace int) error {
 			shard := key.KeyRangeString(kr)
 			hostname := fmt.Sprintf("%s/%s", ks, shard)
 			log.Infof("registering test tablet %s for keyspace %s shard %s", hostname, ks, shard)
+			sc := healthCheck.AddTestTablet(vtexplainCell, hostname, 1, ks, shard, topodatapb.TabletType_MASTER, true, 1, nil)
 
-			tablet := healthCheck.AddFakeTablet(vtexplainCell, hostname, 1, ks, shard, topodatapb.TabletType_MASTER, true, 1, nil, func(t *topodatapb.Tablet) queryservice.QueryService {
-				return newTablet(t)
-			})
-			explainTopo.TabletConns[hostname] = tablet.(*explainTablet)
+			tablet := newFakeTablet()
+			sc.Executor = tablet
+
+			explainTopo.TabletConns[hostname] = sc
 		}
 	}
 
@@ -114,7 +113,7 @@ func buildTopology(vschemaStr string, numShardsPerKeyspace int) error {
 }
 
 func vtgateExecute(sql string) ([]*engine.Plan, map[string]*TabletActions, error) {
-	_, err := vtgateExecutor.Execute(context.Background(), "VtexplainExecute", vtgateSession, sql, nil)
+	_, err := vtgateExecutor.Execute(context.Background(), vtgateSession, sql, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("vtexplain execute error: %v in %s", err, sql)
 	}
@@ -130,21 +129,28 @@ func vtgateExecute(sql string) ([]*engine.Plan, map[string]*TabletActions, error
 
 	tabletActions := make(map[string]*TabletActions)
 	for shard, tc := range explainTopo.TabletConns {
-		if len(tc.tabletQueries) == 0 {
+		if len(tc.Queries) == 0 {
 			continue
 		}
 
-		actions := &TabletActions{
-			TabletQueries: tc.tabletQueries,
-			MysqlQueries:  tc.mysqlQueries,
+		tablet := tc.Executor.(*fakeTablet)
+
+		tqs := make([]*TabletQuery, 0, len(tc.Queries))
+		for _, bq := range tc.Queries {
+			tq := &TabletQuery{
+				SQL:      bq.Sql,
+				BindVars: sqltypes.CopyBindVariables(bq.BindVariables),
+			}
+			tqs = append(tqs, tq)
 		}
 
-		tc.tabletQueries = nil
-		tc.mysqlQueries = nil
+		tabletActions[shard] = &TabletActions{
+			TabletQueries: tqs,
+			MysqlQueries:  tablet.queries,
+		}
 
-		sort.Sort(actions.TabletQueries)
-		sort.Sort(actions.MysqlQueries)
-		tabletActions[shard] = actions
+		tc.Queries = nil
+		tablet.queries = nil
 	}
 
 	return plans, tabletActions, nil

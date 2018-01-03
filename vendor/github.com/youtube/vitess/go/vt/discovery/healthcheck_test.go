@@ -26,10 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/youtube/vitess/go/vt/grpcclient"
 	"github.com/youtube/vitess/go/vt/status"
 	"github.com/youtube/vitess/go/vt/topo"
-	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/vttablet/queryservice"
 	"github.com/youtube/vitess/go/vt/vttablet/queryservice/fakes"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletconn"
@@ -57,7 +55,7 @@ func TestHealthCheck(t *testing.T) {
 	createFakeConn(tablet, input)
 	t.Logf(`createFakeConn({Host: "a", PortMap: {"vt": 1}}, c)`)
 	l := newListener()
-	hc := NewHealthCheck(1*time.Millisecond, time.Hour).(*HealthCheckImpl)
+	hc := NewHealthCheck(1*time.Millisecond, 1*time.Millisecond, time.Hour).(*HealthCheckImpl)
 	hc.SetListener(l, true)
 	hc.AddTablet(tablet, "")
 	t.Logf(`hc = HealthCheck(); hc.AddTablet({Host: "a", PortMap: {"vt": 1}}, "")`)
@@ -97,12 +95,6 @@ func TestHealthCheck(t *testing.T) {
 	if !reflect.DeepEqual(res, want) {
 		t.Errorf(`<-l.output: %+v; want %+v`, res, want)
 	}
-
-	// Verify that the error count is initialized to 0 after the first tablet response.
-	if err := checkErrorCounter("k", "s", topodatapb.TabletType_MASTER, 0); err != nil {
-		t.Errorf("%v", err)
-	}
-
 	tcsl := hc.CacheStatus()
 	tcslWant := TabletsCacheStatusList{{
 		Cell:   "cell",
@@ -155,10 +147,6 @@ func TestHealthCheck(t *testing.T) {
 	res = <-l.output
 	if !reflect.DeepEqual(res, want) {
 		t.Errorf(`<-l.output: %+v; want %+v`, res, want)
-	}
-
-	if err := checkErrorCounter("k", "s", topodatapb.TabletType_REPLICA, 0); err != nil {
-		t.Errorf("%v", err)
 	}
 
 	// Serving & RealtimeStats changed
@@ -238,7 +226,7 @@ func TestHealthCheckStreamError(t *testing.T) {
 	fc.errCh = make(chan error)
 	t.Logf(`createFakeConn({Host: "a", PortMap: {"vt": 1}}, c)`)
 	l := newListener()
-	hc := NewHealthCheck(1*time.Millisecond, time.Hour).(*HealthCheckImpl)
+	hc := NewHealthCheck(1*time.Millisecond, 1*time.Millisecond, time.Hour).(*HealthCheckImpl)
 	hc.SetListener(l, true)
 	hc.AddTablet(tablet, "")
 	t.Logf(`hc = HealthCheck(); hc.AddTablet({Host: "a", PortMap: {"vt": 1}}, "")`)
@@ -310,7 +298,7 @@ func TestHealthCheckVerifiesTabletAlias(t *testing.T) {
 	t.Logf(`createFakeConn({Host: "a", PortMap: {"vt": 1}}, c)`)
 
 	l := newListener()
-	hc := NewHealthCheck(1*time.Millisecond, time.Hour).(*HealthCheckImpl)
+	hc := NewHealthCheck(1*time.Millisecond, 1*time.Millisecond, time.Hour).(*HealthCheckImpl)
 	hc.SetListener(l, false)
 	hc.AddTablet(tablet, "")
 	t.Logf(`hc = HealthCheck(); hc.AddTablet({Host: "a", PortMap: {"vt": 1}}, "")`)
@@ -376,7 +364,7 @@ func TestHealthCheckCloseWaitsForGoRoutines(t *testing.T) {
 	t.Logf(`createFakeConn({Host: "a", PortMap: {"vt": 1}}, c)`)
 
 	l := newListener()
-	hc := NewHealthCheck(1*time.Millisecond, time.Hour).(*HealthCheckImpl)
+	hc := NewHealthCheck(1*time.Millisecond, 1*time.Millisecond, time.Hour).(*HealthCheckImpl)
 	hc.SetListener(l, false)
 	hc.AddTablet(tablet, "")
 	t.Logf(`hc = HealthCheck(); hc.AddTablet({Host: "a", PortMap: {"vt": 1}}, "")`)
@@ -471,7 +459,7 @@ func TestHealthCheckTimeout(t *testing.T) {
 	fc := createFakeConn(tablet, input)
 	t.Logf(`createFakeConn({Host: "a", PortMap: {"vt": 1}}, c)`)
 	l := newListener()
-	hc := NewHealthCheck(1*time.Millisecond, timeout).(*HealthCheckImpl)
+	hc := NewHealthCheck(1*time.Millisecond, 1*time.Millisecond, timeout).(*HealthCheckImpl)
 	hc.SetListener(l, false)
 	hc.AddTablet(tablet, "")
 	t.Logf(`hc = HealthCheck(); hc.AddTablet({Host: "a", PortMap: {"vt": 1}}, "")`)
@@ -512,20 +500,12 @@ func TestHealthCheckTimeout(t *testing.T) {
 		t.Errorf(`<-l.output: %+v; want %+v`, res, want)
 	}
 
-	if err := checkErrorCounter("k", "s", topodatapb.TabletType_MASTER, 0); err != nil {
-		t.Errorf("%v", err)
-	}
-
 	// wait for timeout period
 	time.Sleep(2 * timeout)
 	t.Logf(`Sleep(2 * timeout)`)
 	res = <-l.output
 	if res.Serving {
 		t.Errorf(`<-l.output: %+v; want not serving`, res)
-	}
-
-	if err := checkErrorCounter("k", "s", topodatapb.TabletType_MASTER, 1); err != nil {
-		t.Errorf("%v", err)
 	}
 
 	if !fc.isCanceled() {
@@ -597,7 +577,7 @@ func createFakeConn(tablet *topodatapb.Tablet, c chan *querypb.StreamHealthRespo
 	return conn
 }
 
-func discoveryDialer(tablet *topodatapb.Tablet, failFast grpcclient.FailFast) (queryservice.QueryService, error) {
+func discoveryDialer(tablet *topodatapb.Tablet, timeout time.Duration) (queryservice.QueryService, error) {
 	key := TabletToMapKey(tablet)
 	return connMap[key], nil
 }
@@ -643,18 +623,4 @@ func (fc *fakeConn) isCanceled() bool {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	return fc.canceled
-}
-
-func checkErrorCounter(keyspace, shard string, tabletType topodatapb.TabletType, want int64) error {
-	statsKey := []string{keyspace, shard, topoproto.TabletTypeLString(tabletType)}
-	name := strings.Join(statsKey, ".")
-	got, ok := hcErrorCounters.Counts()[name]
-	if !ok {
-		return fmt.Errorf("hcErrorCounters not correctly initialized")
-	}
-	if got != want {
-		return fmt.Errorf("wrong value for hcErrorCounters got = %v, want = %v", got, want)
-	}
-
-	return nil
 }

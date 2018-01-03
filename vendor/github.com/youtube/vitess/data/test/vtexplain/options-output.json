@@ -1,16 +1,16 @@
 [
     {
-        "SQL": "select * from user where email='null@void.com'",
+        "SQL": "select * from user where email=\"null@void.com\"",
         "Plans": [
             {
-                "Original": "select * from user where email='null@void.com'",
+                "Original": "select * from user where email = :vtg1",
                 "Instructions": {
                     "Opcode": "SelectScatter",
                     "Keyspace": {
                         "Name": "ks_sharded",
                         "Sharded": true
                     },
-                    "Query": "select * from user where email = 'null@void.com'",
+                    "Query": "select * from user where email = :vtg1",
                     "FieldQuery": "select * from user where 1 != 1"
                 }
             }
@@ -19,69 +19,57 @@
             "ks_sharded/-40": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com'",
+                        "SQL": "select * from user where email = :vtg1",
                         "BindVars": {
-                            "#maxLimit": "10001"
+                            "vtg1": "'null@void.com'"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com' limit 10001"
-                    }
+                    "select * from user where 1 != 1",
+                    "select * from user where email = 'null@void.com' limit 10001"
                 ]
             },
             "ks_sharded/40-80": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com'",
+                        "SQL": "select * from user where email = :vtg1",
                         "BindVars": {
-                            "#maxLimit": "10001"
+                            "vtg1": "'null@void.com'"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com' limit 10001"
-                    }
+                    "select * from user where 1 != 1",
+                    "select * from user where email = 'null@void.com' limit 10001"
                 ]
             },
             "ks_sharded/80-c0": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com'",
+                        "SQL": "select * from user where email = :vtg1",
                         "BindVars": {
-                            "#maxLimit": "10001"
+                            "vtg1": "'null@void.com'"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com' limit 10001"
-                    }
+                    "select * from user where 1 != 1",
+                    "select * from user where email = 'null@void.com' limit 10001"
                 ]
             },
             "ks_sharded/c0-": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com'",
+                        "SQL": "select * from user where email = :vtg1",
                         "BindVars": {
-                            "#maxLimit": "10001"
+                            "vtg1": "'null@void.com'"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "select * from user where email = 'null@void.com' limit 10001"
-                    }
+                    "select * from user where 1 != 1",
+                    "select * from user where email = 'null@void.com' limit 10001"
                 ]
             }
         }
@@ -90,7 +78,7 @@
         "SQL": "select * from user where id in (1,2,3,4,5,6,7,8)",
         "Plans": [
             {
-                "Original": "select * from user where id in (1,2,3,4,5,6,7,8)",
+                "Original": "select * from user where id in ::vtg1",
                 "Instructions": {
                     "Opcode": "SelectIN",
                     "Keyspace": {
@@ -101,16 +89,7 @@
                     "FieldQuery": "select * from user where 1 != 1",
                     "Vindex": "hash",
                     "Values": [
-                        [
-                            1,
-                            2,
-                            3,
-                            4,
-                            5,
-                            6,
-                            7,
-                            8
-                        ]
+                        "::vtg1"
                     ]
                 }
             }
@@ -119,64 +98,55 @@
             "ks_sharded/-40": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
                         "SQL": "select * from user where id in ::__vals",
                         "BindVars": {
-                            "#maxLimit": "10001",
-                            "__vals": "(1, 2)"
+                            "__vals": "(1, 2)",
+                            "vtg1": "(1, 2, 3, 4, 5, 6, 7, 8)"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "select * from user where id in (1, 2) limit 10001"
-                    }
+                    "select * from user where 1 != 1",
+                    "select * from user where id in (1, 2) limit 10001"
                 ]
             },
             "ks_sharded/40-80": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
                         "SQL": "select * from user where id in ::__vals",
                         "BindVars": {
-                            "#maxLimit": "10001",
-                            "__vals": "(3, 5)"
+                            "__vals": "(3, 5)",
+                            "vtg1": "(1, 2, 3, 4, 5, 6, 7, 8)"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "select * from user where id in (3, 5) limit 10001"
-                    }
+                    "select * from user where 1 != 1",
+                    "select * from user where id in (3, 5) limit 10001"
                 ]
             },
             "ks_sharded/c0-": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
                         "SQL": "select * from user where id in ::__vals",
                         "BindVars": {
-                            "#maxLimit": "10001",
-                            "__vals": "(4, 6, 7, 8)"
+                            "__vals": "(4, 6, 7, 8)",
+                            "vtg1": "(1, 2, 3, 4, 5, 6, 7, 8)"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "select * from user where id in (4, 6, 7, 8) limit 10001"
-                    }
+                    "select * from user where 1 != 1",
+                    "select * from user where id in (4, 6, 7, 8) limit 10001"
                 ]
             }
         }
     },
     {
-        "SQL": "insert into user (id, name) values(2, 'bob')",
+        "SQL": "insert into user (id, name) values(2, \"bob\")",
         "Plans": [
             {
-                "Original": "insert into name_user_map(name, user_id) values(:name0, :user_id0)",
+                "Original": "insert into name_user_map(name, user_id) values (:name0, :user_id0)",
                 "Instructions": {
                     "Opcode": "InsertSharded",
                     "Keyspace": {
@@ -197,7 +167,7 @@
                 }
             },
             {
-                "Original": "insert into user (id, name) values(2, 'bob')",
+                "Original": "insert into user(id, name) values (:vtg1, :vtg2)",
                 "Instructions": {
                     "Opcode": "InsertSharded",
                     "Keyspace": {
@@ -207,10 +177,10 @@
                     "Query": "insert into user(id, name) values (:_id0, :_name0)",
                     "Values": [
                         [
-                            2
+                            ":vtg1"
                         ],
                         [
-                            "bob"
+                            ":vtg2"
                         ]
                     ],
                     "Table": "user",
@@ -225,37 +195,26 @@
             "ks_sharded/-40": {
                 "TabletQueries": [
                     {
-                        "Time": 2,
                         "SQL": "insert into user(id, name) values (:_id0, :_name0) /* vtgate:: keyspace_id:06e7ea22ce92708f */",
                         "BindVars": {
-                            "#maxLimit": "10001",
                             "_id0": "2",
-                            "_name0": "'bob'"
+                            "_name0": "'bob'",
+                            "vtg1": "2",
+                            "vtg2": "'bob'"
                         }
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 2,
-                        "SQL": "begin"
-                    },
-                    {
-                        "Time": 2,
-                        "SQL": "insert into user(id, name) values (2, 'bob') /* _stream user (id ) (2 ); */ /* vtgate:: keyspace_id:06e7ea22ce92708f */"
-                    },
-                    {
-                        "Time": 4,
-                        "SQL": "commit"
-                    }
+                    "begin",
+                    "insert into user(id, name) values (2, 'bob') /* _stream user (id ) (2 ); */",
+                    "commit"
                 ]
             },
             "ks_sharded/c0-": {
                 "TabletQueries": [
                     {
-                        "Time": 1,
                         "SQL": "insert into name_user_map(name, user_id) values (:_name0, :user_id0) /* vtgate:: keyspace_id:da8a82595aa28154c17717955ffeed8b */",
                         "BindVars": {
-                            "#maxLimit": "10001",
                             "_name0": "'bob'",
                             "name0": "'bob'",
                             "user_id0": "2"
@@ -263,18 +222,9 @@
                     }
                 ],
                 "MysqlQueries": [
-                    {
-                        "Time": 1,
-                        "SQL": "begin"
-                    },
-                    {
-                        "Time": 1,
-                        "SQL": "insert into name_user_map(name, user_id) values ('bob', 2) /* _stream name_user_map (name user_id ) ('Ym9i' 2 ); */ /* vtgate:: keyspace_id:da8a82595aa28154c17717955ffeed8b */"
-                    },
-                    {
-                        "Time": 3,
-                        "SQL": "commit"
-                    }
+                    "begin",
+                    "insert into name_user_map(name, user_id) values ('bob', 2) /* _stream name_user_map (name user_id ) ('Ym9i' 2 ); */",
+                    "commit"
                 ]
             }
         }

@@ -195,18 +195,15 @@ class TestBaseSplitClone(unittest.TestCase, base_sharding.BaseShardingTest):
     # NOTE: The future master has to be started with type 'replica'.
     shard_tablets.master.start_vttablet(
         wait_for_state=None, init_tablet_type='replica',
-        init_keyspace='test_keyspace', init_shard=shard_name,
-        binlog_use_v3_resharding_mode=False)
+        init_keyspace='test_keyspace', init_shard=shard_name)
     for t in shard_tablets.replicas:
       t.start_vttablet(
           wait_for_state=None, init_tablet_type='replica',
-          init_keyspace='test_keyspace', init_shard=shard_name,
-          binlog_use_v3_resharding_mode=False)
+          init_keyspace='test_keyspace', init_shard=shard_name)
     for t in shard_tablets.rdonlys:
       t.start_vttablet(
           wait_for_state=None, init_tablet_type='rdonly',
-          init_keyspace='test_keyspace', init_shard=shard_name,
-          binlog_use_v3_resharding_mode=False)
+          init_keyspace='test_keyspace', init_shard=shard_name)
 
     # Block until tablets are up and we can enable replication.
     # All tables should be NOT_SERVING until we run InitShardMaster.
@@ -361,9 +358,7 @@ class TestBaseSplitClone(unittest.TestCase, base_sharding.BaseShardingTest):
     _ = source_tablets, destination_tablets
     logging.debug('Running vtworker SplitDiff for %s', keyspace_shard)
     _, _ = utils.run_vtworker(
-        ['-cell', 'test_nj',
-         '--use_v3_resharding_mode=false',
-         'SplitDiff',
+        ['-cell', 'test_nj', 'SplitDiff',
          '--min_healthy_rdonly_tablets', '1',
          keyspace_shard], auto_log=True)
 
@@ -455,7 +450,7 @@ class TestBaseSplitCloneResiliency(TestBaseSplitClone):
            shard_1_master.shutdown_mysql()])
 
     worker_proc, worker_port, worker_rpc_port = utils.run_vtworker_bg(
-        ['--cell', 'test_nj', '--use_v3_resharding_mode=false'],
+        ['--cell', 'test_nj'],
         auto_log=True)
 
     # --max_tps is only specified to enable the throttler and ensure that the
@@ -562,9 +557,7 @@ class TestBaseSplitCloneResiliency(TestBaseSplitClone):
     utils.wait_for_replication_pos(shard_0_replica, shard_0_rdonly1)
     utils.wait_for_replication_pos(shard_1_replica, shard_1_rdonly1)
     # Run final offline clone to enable filtered replication.
-    _, _ = utils.run_vtworker(['-cell', 'test_nj',
-                               '--use_v3_resharding_mode=false',
-                               'SplitClone',
+    _, _ = utils.run_vtworker(['-cell', 'test_nj', 'SplitClone',
                                '--online=false',
                                '--min_healthy_rdonly_tablets', '1',
                                'test_keyspace/0'], auto_log=True)
@@ -666,7 +659,6 @@ class TestMinHealthyRdonlyTablets(TestBaseSplitCloneResiliency):
     _, stderr = utils.run_vtworker(
         ['-cell', 'test_nj',
          '--wait_for_healthy_rdonly_tablets_timeout', '1s',
-         '--use_v3_resharding_mode=false',
          'SplitClone',
          '--min_healthy_rdonly_tablets', '2',
          'test_keyspace/0'],

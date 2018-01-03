@@ -20,6 +20,13 @@ import java.sql.DriverPropertyInfo;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Properties;
+import org.junit.Assert;
+import org.junit.Test;
+import org.mockito.Mockito;
+
+import io.vitess.proto.Query;
+import io.vitess.proto.Topodata;
+import io.vitess.util.Constants;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -31,7 +38,7 @@ import io.vitess.util.Constants;
 
 public class ConnectionPropertiesTest {
 
-    private static final int NUM_PROPS = 36;
+    private static final int NUM_PROPS = 32;
 
     @Test
     public void testReflection() throws Exception {
@@ -66,9 +73,6 @@ public class ConnectionPropertiesTest {
         Assert.assertEquals("includedFieldsCache", true, props.isIncludeAllFields());
         Assert.assertEquals("tabletType", Constants.DEFAULT_TABLET_TYPE, props.getTabletType());
         Assert.assertEquals("useSSL", false, props.getUseSSL());
-        Assert.assertEquals("useAffectedRows", true, props.getUseAffectedRows());
-        Assert.assertEquals("refreshConnection", false, props.getRefreshConnection());
-        Assert.assertEquals("refreshSeconds", 60, props.getRefreshSeconds());
     }
 
     @Test

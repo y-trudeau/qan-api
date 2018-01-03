@@ -73,10 +73,6 @@ type builder interface {
 	// just on optimization hint.
 	PushOrderByNull()
 
-	// PushOrderByRand pushes the special case ORDER BY RAND() to
-	// all primitives.
-	PushOrderByRand()
-
 	// SetUpperLimit is an optimization hint that tells that primitive
 	// that it does not need to return more than the specified number of rows.
 	// A primitive that cannot perform this can ignore the request.
@@ -117,8 +113,7 @@ type columnOriginator interface {
 // VSchema defines the interface for this package to fetch
 // info about tables.
 type VSchema interface {
-	FindTable(tablename sqlparser.TableName) (*vindexes.Table, error)
-	FindTableOrVindex(tablename sqlparser.TableName) (*vindexes.Table, vindexes.Vindex, error)
+	Find(tablename sqlparser.TableName) (table *vindexes.Table, err error)
 	DefaultKeyspace() (*vindexes.Keyspace, error)
 }
 

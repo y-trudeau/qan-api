@@ -493,8 +493,7 @@ class TestEcho(TestPythonClientBase):
   options_echo = ('include_event_token:true compare_event_token:'
                   '<timestamp:123 shard:"-80" position:"test_pos" > ')
 
-  session_echo = ('autocommit:true target_string:"@replica" '
-                  'options:<include_event_token:'
+  session_echo = ('target_string:"@replica" options:<include_event_token:'
                   'true compare_event_token:<timestamp:123 shard:'
                   '"-80" position:"test_pos" > > ')
 

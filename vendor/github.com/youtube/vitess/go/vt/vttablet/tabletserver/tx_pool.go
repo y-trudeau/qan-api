@@ -258,6 +258,7 @@ func (axp *TxPool) LocalBegin(ctx context.Context, useFoundRows bool, txIsolatio
 func (axp *TxPool) LocalCommit(ctx context.Context, conn *TxConnection, messager *messager.Engine) error {
 	defer conn.conclude(TxCommit)
 	defer messager.LockDB(conn.NewMessages, conn.ChangedMessages)()
+	txStats.Add("Completed", time.Now().Sub(conn.StartTime))
 	if _, err := conn.Exec(ctx, "commit", 1, false); err != nil {
 		conn.Close()
 		return err
@@ -276,6 +277,7 @@ func (axp *TxPool) LocalConclude(ctx context.Context, conn *TxConnection) {
 
 func (axp *TxPool) localRollback(ctx context.Context, conn *TxConnection) error {
 	defer conn.conclude(TxRollback)
+	txStats.Add("Aborted", time.Now().Sub(conn.StartTime))
 	if _, err := conn.Exec(ctx, "rollback", 1, false); err != nil {
 		conn.Close()
 		return err
@@ -345,13 +347,7 @@ func (txc *TxConnection) Exec(ctx context.Context, query string, maxrows int, wa
 	r, err := txc.DBConn.ExecOnce(ctx, query, maxrows, wantfields)
 	if err != nil {
 		if mysql.IsConnErr(err) {
-			select {
-			case <-ctx.Done():
-				// If the context is done, the query was killed.
-				// So, don't trigger a mysql check.
-			default:
-				txc.pool.checker.CheckMySQL()
-			}
+			txc.pool.checker.CheckMySQL()
 		}
 		return nil, err
 	}
@@ -402,7 +398,6 @@ func (txc *TxConnection) log(conclusion string) {
 	duration := txc.EndTime.Sub(txc.StartTime)
 	tabletenv.UserTransactionCount.Add([]string{username, conclusion}, 1)
 	tabletenv.UserTransactionTimesNs.Add([]string{username, conclusion}, int64(duration))
-	txStats.Add(conclusion, duration)
 	if txc.LogToFile.Get() != 0 {
 		log.Infof("Logged transaction: %s", txc.Format(nil))
 	}

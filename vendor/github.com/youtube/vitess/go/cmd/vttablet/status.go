@@ -194,7 +194,7 @@ var onStatusRegistered func()
 func addStatusParts(qsc tabletserver.Controller) {
 	servenv.AddStatusPart("Tablet", tabletTemplate, func() interface{} {
 		return map[string]interface{}{
-			"Tablet":               topo.NewTabletInfo(agent.Tablet(), nil),
+			"Tablet":               topo.NewTabletInfo(agent.Tablet(), -1),
 			"BlacklistedTables":    agent.BlacklistedTables(),
 			"DisallowQueryService": agent.DisallowQueryService(),
 			"DisableUpdateStream":  !agent.EnableUpdateStream(),

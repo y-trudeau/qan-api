@@ -49,9 +49,8 @@ spec:
 
           su -p -s /bin/bash -c "/vt/bin/vttablet
           -binlog_use_v3_resharding_mode
-          -topo_implementation etcd2
-          -topo_global_server_address http://etcd-global-client:2379
-          -topo_global_root /global
+          -topo_implementation etcd
+          -etcd_global_addrs http://etcd-global:4001
           -log_dir $VTDATAROOT/tmp
           -alsologtostderr
           -port {{port}}

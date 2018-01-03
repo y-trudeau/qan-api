@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"net"
-	"os"
 	"syscall"
 
 	log "github.com/golang/glog"
@@ -30,10 +29,10 @@ import (
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/callerid"
 	"github.com/youtube/vitess/go/vt/servenv"
-	"github.com/youtube/vitess/go/vt/vttls"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	vtgatepb "github.com/youtube/vitess/go/vt/proto/vtgate"
+	"github.com/youtube/vitess/go/vt/servenv/grpcutils"
 )
 
 var (
@@ -75,7 +74,7 @@ func (vh *vtgateHandler) ConnectionClosed(c *mysql.Conn) {
 	}
 }
 
-func (vh *vtgateHandler) ComQuery(c *mysql.Conn, query string, callback func(*sqltypes.Result) error) error {
+func (vh *vtgateHandler) ComQuery(c *mysql.Conn, query []byte, callback func(*sqltypes.Result) error) error {
 	// FIXME(alainjobart): Add some kind of timeout to the context.
 	ctx := context.Background()
 
@@ -107,10 +106,10 @@ func (vh *vtgateHandler) ComQuery(c *mysql.Conn, query string, callback func(*sq
 		session.TargetString = c.SchemaName
 	}
 	if session.Options.Workload == querypb.ExecuteOptions_OLAP {
-		err := vh.vtg.StreamExecute(ctx, session, query, make(map[string]*querypb.BindVariable), callback)
+		err := vh.vtg.StreamExecute(ctx, session, string(query), make(map[string]*querypb.BindVariable), callback)
 		return mysql.NewSQLErrorFromError(err)
 	}
-	session, result, err := vh.vtg.Execute(ctx, session, query, make(map[string]*querypb.BindVariable))
+	session, result, err := vh.vtg.Execute(ctx, session, string(query), make(map[string]*querypb.BindVariable))
 	c.ClientData = session
 	err = mysql.NewSQLErrorFromError(err)
 	if err != nil {
@@ -147,12 +146,12 @@ func initMySQLProtocol() {
 	if *mysqlServerPort >= 0 {
 		mysqlListener, err = mysql.NewListener("tcp", net.JoinHostPort(*mysqlServerBindAddress, fmt.Sprintf("%v", *mysqlServerPort)), authServer, vh)
 		if err != nil {
-			log.Exitf("mysql.NewListener failed: %v", err)
+			log.Fatalf("mysql.NewListener failed: %v", err)
 		}
 		if *mysqlSslCert != "" && *mysqlSslKey != "" {
-			mysqlListener.TLSConfig, err = vttls.ServerConfig(*mysqlSslCert, *mysqlSslKey, *mysqlSslCa)
+			mysqlListener.TLSConfig, err = grpcutils.TLSServerConfig(*mysqlSslCert, *mysqlSslKey, *mysqlSslCa)
 			if err != nil {
-				log.Exitf("grpcutils.TLSServerConfig failed: %v", err)
+				log.Fatalf("grpcutils.TLSServerConfig failed: %v", err)
 				return
 			}
 		}
@@ -164,52 +163,24 @@ func initMySQLProtocol() {
 			mysqlListener.SlowConnectWarnThreshold = *mysqlSlowConnectWarnThreshold
 		}
 		// Start listening for tcp
-		go mysqlListener.Accept()
+		go func() {
+			mysqlListener.Accept()
+		}()
 	}
 
 	if *mysqlServerSocketPath != "" {
 		// Let's create this unix socket with permissions to all users. In this way,
 		// clients can connect to vtgate mysql server without being vtgate user
 		oldMask := syscall.Umask(000)
-		mysqlUnixListener, err = newMysqlUnixSocket(*mysqlServerSocketPath, authServer, vh)
+		mysqlUnixListener, err = mysql.NewListener("unix", *mysqlServerSocketPath, authServer, vh)
 		_ = syscall.Umask(oldMask)
 		if err != nil {
-			log.Exitf("mysql.NewListener failed: %v", err)
-			return
+			log.Fatalf("mysql.NewListener failed: %v", err)
 		}
 		// Listen for unix socket
-		go mysqlUnixListener.Accept()
-	}
-}
-
-// newMysqlUnixSocket creates a new unix socket mysql listener. If a socket file already exists, attempts
-// to clean it up.
-func newMysqlUnixSocket(address string, authServer mysql.AuthServer, handler mysql.Handler) (*mysql.Listener, error) {
-	listener, err := mysql.NewListener("unix", address, authServer, handler)
-	switch err := err.(type) {
-	case nil:
-		return listener, nil
-	case *net.OpError:
-		log.Warningf("Found existent socket when trying to create new unix mysql listener: %s, attempting to clean up", address)
-		// err.Op should never be different from listen, just being extra careful
-		// in case in the future other errors are returned here
-		if err.Op != "listen" {
-			return nil, err
-		}
-		_, dialErr := net.Dial("unix", address)
-		if dialErr == nil {
-			log.Errorf("Existent socket '%s' is still accepting connections, aborting", address)
-			return nil, err
-		}
-		removeFileErr := os.Remove(address)
-		if removeFileErr != nil {
-			log.Errorf("Couldn't remove existent socket file: %s", address)
-			return nil, err
-		}
-		listener, listenerErr := mysql.NewListener("unix", address, authServer, handler)
-		return listener, listenerErr
-	default:
-		return nil, err
+		go func() {
+			mysqlUnixListener.Accept()
+		}()
 	}
 }
 

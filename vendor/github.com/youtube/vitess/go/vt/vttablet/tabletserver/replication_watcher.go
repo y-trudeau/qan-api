@@ -28,6 +28,7 @@ import (
 	"github.com/youtube/vitess/go/vt/binlog"
 	"github.com/youtube/vitess/go/vt/binlog/eventtoken"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
+	"github.com/youtube/vitess/go/vt/mysqlctl"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
 
@@ -39,8 +40,6 @@ import (
 // replication stream. It can tell you the current event token,
 // and it will trigger schema reloads if a DDL is encountered.
 type ReplicationWatcher struct {
-	dbconfigs dbconfigs.DBConfigs
-
 	// Life cycle management vars
 	isOpen bool
 	cancel context.CancelFunc
@@ -78,20 +77,15 @@ func NewReplicationWatcher(se *schema.Engine, config tabletenv.TabletConfig) *Re
 	return rpw
 }
 
-// InitDBConfig must be called before Open.
-func (rpw *ReplicationWatcher) InitDBConfig(dbcfgs dbconfigs.DBConfigs) {
-	rpw.dbconfigs = dbcfgs
-}
-
 // Open starts the ReplicationWatcher service.
-func (rpw *ReplicationWatcher) Open() {
+func (rpw *ReplicationWatcher) Open(dbconfigs dbconfigs.DBConfigs, mysqld mysqlctl.MysqlDaemon) {
 	if rpw.isOpen || !rpw.watchReplication {
 		return
 	}
 	ctx, cancel := context.WithCancel(tabletenv.LocalContext())
 	rpw.cancel = cancel
 	rpw.wg.Add(1)
-	go rpw.Process(ctx, rpw.dbconfigs)
+	go rpw.Process(ctx, dbconfigs, mysqld)
 	rpw.isOpen = true
 }
 
@@ -106,16 +100,14 @@ func (rpw *ReplicationWatcher) Close() {
 }
 
 // Process processes the replication stream.
-func (rpw *ReplicationWatcher) Process(ctx context.Context, dbconfigs dbconfigs.DBConfigs) {
+func (rpw *ReplicationWatcher) Process(ctx context.Context, dbconfigs dbconfigs.DBConfigs, mysqld mysqlctl.MysqlDaemon) {
 	defer func() {
 		tabletenv.LogError()
 		rpw.wg.Done()
 	}()
 	for {
 		log.Infof("Starting a binlog Streamer from current replication position to monitor binlogs")
-		cp := dbconfigs.Dba
-		cp.DbName = dbconfigs.App.DbName
-		streamer := binlog.NewStreamer(&cp, rpw.se, nil /*clientCharset*/, mysql.Position{}, 0 /*timestamp*/, func(eventToken *querypb.EventToken, statements []binlog.FullBinlogStatement) error {
+		streamer := binlog.NewStreamer(dbconfigs.App.DbName, mysqld, rpw.se, nil /*clientCharset*/, mysql.Position{}, 0 /*timestamp*/, func(eventToken *querypb.EventToken, statements []binlog.FullBinlogStatement) error {
 			// Save the event token.
 			rpw.mu.Lock()
 			rpw.eventToken = eventToken
