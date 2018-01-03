@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package vtgate
 
@@ -24,6 +12,7 @@ import (
 
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/key"
+	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/querytypes"
 	"golang.org/x/net/context"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
@@ -131,7 +120,10 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q1",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q1var": sqltypes.Int64BindVariable(1),
+							"q1var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("1"),
+							},
 						},
 					},
 					Keyspace: "ks1",
@@ -140,7 +132,10 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q2",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q2var": sqltypes.Int64BindVariable(2),
+							"q2var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("2"),
+							},
 						},
 					},
 					Keyspace: "ks1",
@@ -149,7 +144,10 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q3",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q3var": sqltypes.Int64BindVariable(3),
+							"q3var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("3"),
+							},
 						},
 					},
 					Keyspace: "ks2",
@@ -160,11 +158,14 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 				Length: 3,
 				Requests: map[string]*shardBatchRequest{
 					"ks1:0": {
-						Queries: []*querypb.BoundQuery{
+						Queries: []querytypes.BoundQuery{
 							{
 								Sql: "q1",
-								BindVariables: map[string]*querypb.BindVariable{
-									"q1var": sqltypes.Int64BindVariable(1),
+								BindVariables: map[string]interface{}{
+									"q1var": &querypb.BindVariable{
+										Type:  sqltypes.Int64,
+										Value: []byte("1"),
+									},
 								},
 							},
 						},
@@ -173,16 +174,22 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 						ResultIndexes: []int{0},
 					},
 					"ks1:1": {
-						Queries: []*querypb.BoundQuery{
+						Queries: []querytypes.BoundQuery{
 							{
 								Sql: "q1",
-								BindVariables: map[string]*querypb.BindVariable{
-									"q1var": sqltypes.Int64BindVariable(1),
+								BindVariables: map[string]interface{}{
+									"q1var": &querypb.BindVariable{
+										Type:  sqltypes.Int64,
+										Value: []byte("1"),
+									},
 								},
 							}, {
 								Sql: "q2",
-								BindVariables: map[string]*querypb.BindVariable{
-									"q2var": sqltypes.Int64BindVariable(2),
+								BindVariables: map[string]interface{}{
+									"q2var": &querypb.BindVariable{
+										Type:  sqltypes.Int64,
+										Value: []byte("2"),
+									},
 								},
 							},
 						},
@@ -191,11 +198,14 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 						ResultIndexes: []int{0, 1},
 					},
 					"ks2:1": {
-						Queries: []*querypb.BoundQuery{
+						Queries: []querytypes.BoundQuery{
 							{
 								Sql: "q3",
-								BindVariables: map[string]*querypb.BindVariable{
-									"q3var": sqltypes.Int64BindVariable(3),
+								BindVariables: map[string]interface{}{
+									"q3var": &querypb.BindVariable{
+										Type:  sqltypes.Int64,
+										Value: []byte("3"),
+									},
 								},
 							},
 						},
@@ -212,7 +222,10 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q1",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q1var": sqltypes.Int64BindVariable(1),
+							"q1var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("1"),
+							},
 						},
 					},
 					Keyspace: "ks1",
@@ -223,11 +236,14 @@ func TestBoundShardQueriesToScatterBatchRequest(t *testing.T) {
 				Length: 1,
 				Requests: map[string]*shardBatchRequest{
 					"ks1:0": {
-						Queries: []*querypb.BoundQuery{
+						Queries: []querytypes.BoundQuery{
 							{
 								Sql: "q1",
-								BindVariables: map[string]*querypb.BindVariable{
-									"q1var": sqltypes.Int64BindVariable(1),
+								BindVariables: map[string]interface{}{
+									"q1var": &querypb.BindVariable{
+										Type:  sqltypes.Int64,
+										Value: []byte("1"),
+									},
 								},
 							},
 						},
@@ -268,7 +284,10 @@ func TestBoundKeyspaceIdQueriesToBoundShardQueries(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q1",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q1var": sqltypes.Int64BindVariable(1),
+							"q1var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("1"),
+							},
 						},
 					},
 					Keyspace:    KsTestSharded,
@@ -277,7 +296,10 @@ func TestBoundKeyspaceIdQueriesToBoundShardQueries(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q2",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q2var": sqltypes.Int64BindVariable(2),
+							"q2var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("2"),
+							},
 						},
 					},
 					Keyspace:    KsTestSharded,
@@ -289,7 +311,10 @@ func TestBoundKeyspaceIdQueriesToBoundShardQueries(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q1",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q1var": sqltypes.Int64BindVariable(1),
+							"q1var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("1"),
+							},
 						},
 					},
 					Keyspace: KsTestSharded,
@@ -298,7 +323,10 @@ func TestBoundKeyspaceIdQueriesToBoundShardQueries(t *testing.T) {
 					Query: &querypb.BoundQuery{
 						Sql: "q2",
 						BindVariables: map[string]*querypb.BindVariable{
-							"q2var": sqltypes.Int64BindVariable(2),
+							"q2var": {
+								Type:  sqltypes.Int64,
+								Value: []byte("2"),
+							},
 						},
 					},
 					Keyspace: KsTestSharded,
@@ -317,10 +345,10 @@ func TestBoundKeyspaceIdQueriesToBoundShardQueries(t *testing.T) {
 		for _, shardQuery := range shardQueries {
 			sort.Strings(shardQuery.Shards)
 		}
-		got, _ := json.Marshal(shardQueries)
-		want, _ := json.Marshal(testCase.shardQueries)
-		if string(got) != string(want) {
-			t.Errorf("idQueries: %#v\nResponse:   %s\nExpecting: %s", testCase.idQueries, string(got), string(want))
+		if !reflect.DeepEqual(testCase.shardQueries, shardQueries) {
+			got, _ := json.Marshal(shardQueries)
+			want, _ := json.Marshal(testCase.shardQueries)
+			t.Errorf("idQueries: %#v\nResponse:   %s\nExpecting: %s", testCase.idQueries, got, want)
 		}
 	}
 }

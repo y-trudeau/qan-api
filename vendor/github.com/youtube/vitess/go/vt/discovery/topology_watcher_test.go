@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package discovery
 
 import (
@@ -25,7 +9,6 @@ import (
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 	"github.com/youtube/vitess/go/vt/topo"
 	"github.com/youtube/vitess/go/vt/topo/test/faketopo"
-	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"golang.org/x/net/context"
 )
 
@@ -48,13 +31,6 @@ func checkWatcher(t *testing.T, cellTablets bool) {
 	} else {
 		tw = NewShardReplicationWatcher(topo.Server{Impl: ft}, fhc, "aa", "keyspace", "shard", 10*time.Minute, 5)
 		t.Logf(`tw = ShardReplicationWatcher(topo.Server{ft}, fhc, "aa", "keyspace", "shard", 10ms, 5)`)
-	}
-
-	// Wait for the initial topology load to finish. Otherwise we
-	// have a background loadTablets() that's running, and it can
-	// interact with our tests in weird ways.
-	if err := tw.WaitForInitialTopology(); err != nil {
-		t.Fatalf("initial WaitForInitialTopology failed")
 	}
 
 	// add a tablet to the topology
@@ -92,44 +68,21 @@ func checkWatcher(t *testing.T, cellTablets bool) {
 		t.Errorf("fhc.GetAllTablets() = %+v; want %+v", allTablets, want)
 	}
 
-	// Remove and re-add with a new uid. This should trigger a ReplaceTablet in loadTablets,
-	// because the uid does not match.
-	ft.RemoveTablet("aa", 0)
-	ft.AddTablet("aa", 1, "host1", map[string]int32{"vt": 456})
-	tw.loadTablets()
-	t.Logf(`ft.ReplaceTablet("aa", 0, "host1", {"vt": 456}); tw.loadTablets()`)
-	want = &topodatapb.Tablet{
-		Alias: &topodatapb.TabletAlias{
-			Uid: 1,
-		},
-		Hostname: "host1",
-		PortMap:  map[string]int32{"vt": 456},
-	}
-	allTablets = fhc.GetAllTablets()
-	key = TabletToMapKey(want)
-	if _, ok := allTablets[key]; !ok || len(allTablets) != 1 {
-		t.Errorf("fhc.GetAllTablets() = %+v; want %+v", allTablets, want)
-	}
-
 	tw.Stop()
-}
-
-type fakeTopo struct {
-	faketopo.FakeTopo
-	expectGetTabletsByCell bool
-
-	// mu protects the tablets map.
-	mu sync.RWMutex
-
-	// tablets key is topoproto.TabletAliasString(tablet alias).
-	tablets map[string]*topodatapb.Tablet
 }
 
 func newFakeTopo(expectGetTabletsByCell bool) *fakeTopo {
 	return &fakeTopo{
 		expectGetTabletsByCell: expectGetTabletsByCell,
-		tablets:                make(map[string]*topodatapb.Tablet),
+		tablets:                make(map[topodatapb.TabletAlias]*topodatapb.Tablet),
 	}
+}
+
+type fakeTopo struct {
+	faketopo.FakeTopo
+	expectGetTabletsByCell bool
+	mu                     sync.RWMutex
+	tablets                map[topodatapb.TabletAlias]*topodatapb.Tablet
 }
 
 func (ft *fakeTopo) AddTablet(cell string, uid uint32, host string, ports map[string]int32) {
@@ -145,13 +98,9 @@ func (ft *fakeTopo) AddTablet(cell string, uid uint32, host string, ports map[st
 		PortMap:  make(map[string]int32),
 	}
 	for name, port := range ports {
-		if name == "mysql" {
-			topoproto.SetMysqlPort(tablet, port)
-		} else {
-			tablet.PortMap[name] = port
-		}
+		tablet.PortMap[name] = port
 	}
-	ft.tablets[topoproto.TabletAliasString(&ta)] = tablet
+	ft.tablets[ta] = tablet
 }
 
 func (ft *fakeTopo) RemoveTablet(cell string, uid uint32) {
@@ -161,7 +110,7 @@ func (ft *fakeTopo) RemoveTablet(cell string, uid uint32) {
 		Cell: cell,
 		Uid:  uid,
 	}
-	delete(ft.tablets, topoproto.TabletAliasString(&ta))
+	delete(ft.tablets, ta)
 }
 
 func (ft *fakeTopo) GetTabletsByCell(ctx context.Context, cell string) ([]*topodatapb.TabletAlias, error) {
@@ -171,9 +120,9 @@ func (ft *fakeTopo) GetTabletsByCell(ctx context.Context, cell string) ([]*topod
 	ft.mu.RLock()
 	defer ft.mu.RUnlock()
 	res := make([]*topodatapb.TabletAlias, 0, 1)
-	for _, tablet := range ft.tablets {
+	for alias, tablet := range ft.tablets {
 		if tablet.Alias.Cell == cell {
-			res = append(res, tablet.Alias)
+			res = append(res, &alias)
 		}
 	}
 	return res, nil
@@ -190,10 +139,10 @@ func (ft *fakeTopo) GetShardReplication(ctx context.Context, cell, keyspace, sha
 	ft.mu.RLock()
 	defer ft.mu.RUnlock()
 	nodes := make([]*topodatapb.ShardReplication_Node, 0, 1)
-	for _, tablet := range ft.tablets {
+	for alias, tablet := range ft.tablets {
 		if tablet.Alias.Cell == cell {
 			nodes = append(nodes, &topodatapb.ShardReplication_Node{
-				TabletAlias: tablet.Alias,
+				TabletAlias: &alias,
 			})
 		}
 	}
@@ -205,16 +154,7 @@ func (ft *fakeTopo) GetShardReplication(ctx context.Context, cell, keyspace, sha
 func (ft *fakeTopo) GetTablet(ctx context.Context, alias *topodatapb.TabletAlias) (*topodatapb.Tablet, int64, error) {
 	ft.mu.RLock()
 	defer ft.mu.RUnlock()
-	// Note we want to be correct here. The way we call this, we never
-	// change the tablet list in between a call to list them,
-	// and a call to get the record, so we could just blindly return it.
-	// (It wasn't the case before we added the WaitForInitialTopology()
-	// call in the test though!).
-	tablet, ok := ft.tablets[topoproto.TabletAliasString(alias)]
-	if !ok {
-		return nil, 0, topo.ErrNoNode
-	}
-	return tablet, 0, nil
+	return ft.tablets[*alias], 0, nil
 }
 
 func TestFilterByShard(t *testing.T) {

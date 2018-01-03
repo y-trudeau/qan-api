@@ -1,28 +1,15 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package planbuilder
 
 import (
-	log "github.com/golang/glog"
+	"errors"
+	"fmt"
 
-	"github.com/youtube/vitess/go/sqltypes"
-	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
+	log "github.com/golang/glog"
 	"github.com/youtube/vitess/go/vt/sqlparser"
-	"github.com/youtube/vitess/go/vt/vterrors"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
 )
 
@@ -32,18 +19,7 @@ func analyzeUpdate(upd *sqlparser.Update, tables map[string]*schema.Table) (plan
 		FullQuery: GenerateFullQuery(upd),
 	}
 
-	if len(upd.TableExprs) > 1 {
-		plan.Reason = ReasonMultiTable
-		return plan, nil
-	}
-
-	aliased, ok := upd.TableExprs[0].(*sqlparser.AliasedTableExpr)
-	if !ok {
-		plan.Reason = ReasonMultiTable
-		return plan, nil
-	}
-
-	tableName := sqlparser.GetTableName(aliased.Expr)
+	tableName := sqlparser.GetTableName(upd.Table.Expr)
 	if tableName.IsEmpty() {
 		plan.Reason = ReasonTable
 		return plan, nil
@@ -73,7 +49,7 @@ func analyzeUpdate(upd *sqlparser.Update, tables map[string]*schema.Table) (plan
 		return nil, err
 	}
 
-	plan.OuterQuery = GenerateUpdateOuterQuery(upd, nil)
+	plan.OuterQuery = GenerateUpdateOuterQuery(upd)
 
 	if pkValues := analyzeWhere(upd.Where, table.Indexes[0]); pkValues != nil {
 		plan.PlanID = PlanDMLPK
@@ -82,7 +58,7 @@ func analyzeUpdate(upd *sqlparser.Update, tables map[string]*schema.Table) (plan
 	}
 
 	plan.PlanID = PlanDMLSubquery
-	plan.Subquery = GenerateUpdateSubquery(upd, table, aliased)
+	plan.Subquery = GenerateUpdateSubquery(upd, table)
 	return plan, nil
 }
 
@@ -92,16 +68,7 @@ func analyzeDelete(del *sqlparser.Delete, tables map[string]*schema.Table) (plan
 		FullQuery: GenerateFullQuery(del),
 	}
 
-	if len(del.TableExprs) > 1 {
-		plan.Reason = ReasonMultiTable
-		return plan, nil
-	}
-	aliased, ok := del.TableExprs[0].(*sqlparser.AliasedTableExpr)
-	if !ok {
-		plan.Reason = ReasonMultiTable
-		return plan, nil
-	}
-	tableName := sqlparser.GetTableName(aliased.Expr)
+	tableName := sqlparser.GetTableName(del.Table)
 	if tableName.IsEmpty() {
 		plan.Reason = ReasonTable
 		return plan, nil
@@ -131,7 +98,7 @@ func analyzeDelete(del *sqlparser.Delete, tables map[string]*schema.Table) (plan
 	}
 
 	plan.PlanID = PlanDMLSubquery
-	plan.Subquery = GenerateDeleteSubquery(del, table, aliased)
+	plan.Subquery = GenerateDeleteSubquery(del, table)
 	return plan, nil
 }
 
@@ -142,7 +109,7 @@ func analyzeSet(set *sqlparser.Set) (plan *Plan) {
 	}
 }
 
-func analyzeUpdateExpressions(exprs sqlparser.UpdateExprs, pkIndex *schema.Index) (pkValues []sqltypes.PlanValue, err error) {
+func analyzeUpdateExpressions(exprs sqlparser.UpdateExprs, pkIndex *schema.Index) (pkValues []interface{}, err error) {
 	for _, expr := range exprs {
 		index := pkIndex.FindColumn(expr.Name.Name)
 		if index == -1 {
@@ -152,10 +119,10 @@ func analyzeUpdateExpressions(exprs sqlparser.UpdateExprs, pkIndex *schema.Index
 			return nil, ErrTooComplex
 		}
 		if pkValues == nil {
-			pkValues = make([]sqltypes.PlanValue, len(pkIndex.Columns))
+			pkValues = make([]interface{}, len(pkIndex.Columns))
 		}
 		var err error
-		pkValues[index], err = sqlparser.NewPlanValue(expr.Expr)
+		pkValues[index], err = sqlparser.AsInterface(expr.Expr)
 		if err != nil {
 			return nil, err
 		}
@@ -185,14 +152,14 @@ func analyzeSelect(sel *sqlparser.Select, tables map[string]*schema.Table) (plan
 	// Check if it's a NEXT VALUE statement.
 	if nextVal, ok := sel.SelectExprs[0].(sqlparser.Nextval); ok {
 		if table.Type != schema.Sequence {
-			return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "%s is not a sequence", tableName)
+			return nil, fmt.Errorf("%s is not a sequence", tableName)
 		}
 		plan.PlanID = PlanNextval
-		v, err := sqlparser.NewPlanValue(nextVal.Expr)
+		v, err := sqlparser.AsInterface(nextVal.Expr)
 		if err != nil {
 			return nil, err
 		}
-		plan.PKValues = []sqltypes.PlanValue{v}
+		plan.PKValues = []interface{}{v}
 		plan.FieldQuery = nil
 		plan.FullQuery = nil
 	}
@@ -210,7 +177,7 @@ func analyzeFrom(tableExprs sqlparser.TableExprs) sqlparser.TableIdent {
 	return sqlparser.GetTableName(node.Expr)
 }
 
-func analyzeWhere(node *sqlparser.Where, pkIndex *schema.Index) []sqltypes.PlanValue {
+func analyzeWhere(node *sqlparser.Where, pkIndex *schema.Index) []interface{} {
 	if node == nil {
 		return nil
 	}
@@ -250,8 +217,8 @@ func analyzeBoolean(node sqlparser.Expr) (conditions []*sqlparser.ComparisonExpr
 	return nil
 }
 
-func getPKValues(conditions []*sqlparser.ComparisonExpr, pkIndex *schema.Index) []sqltypes.PlanValue {
-	pkValues := make([]sqltypes.PlanValue, len(pkIndex.Columns))
+func getPKValues(conditions []*sqlparser.ComparisonExpr, pkIndex *schema.Index) []interface{} {
+	pkValues := make([]interface{}, len(pkIndex.Columns))
 	inClauseSeen := false
 	for _, condition := range conditions {
 		if condition.Operator == sqlparser.InStr {
@@ -264,17 +231,17 @@ func getPKValues(conditions []*sqlparser.ComparisonExpr, pkIndex *schema.Index) 
 		if index == -1 {
 			return nil
 		}
-		if !pkValues[index].IsNull() {
+		if pkValues[index] != nil {
 			return nil
 		}
 		var err error
-		pkValues[index], err = sqlparser.NewPlanValue(condition.Right)
+		pkValues[index], err = sqlparser.AsInterface(condition.Right)
 		if err != nil {
 			return nil
 		}
 	}
 	for _, v := range pkValues {
-		if v.IsNull() {
+		if v == nil {
 			return nil
 		}
 	}
@@ -285,10 +252,6 @@ func analyzeInsert(ins *sqlparser.Insert, tables map[string]*schema.Table) (plan
 	plan = &Plan{
 		PlanID:    PlanPassDML,
 		FullQuery: GenerateFullQuery(ins),
-	}
-	if ins.Action == sqlparser.ReplaceStr {
-		plan.Reason = ReasonReplace
-		return plan, nil
 	}
 	tableName := sqlparser.GetTableName(ins.Table)
 	if tableName.IsEmpty() {
@@ -316,30 +279,31 @@ func analyzeInsert(ins *sqlparser.Insert, tables map[string]*schema.Table) (plan
 }
 
 func analyzeInsertNoType(ins *sqlparser.Insert, plan *Plan, table *schema.Table) (*Plan, error) {
-	// Populate column list from schema if it wasn't specified.
-	if len(ins.Columns) == 0 {
-		for _, col := range table.Columns {
-			ins.Columns = append(ins.Columns, col.Name)
-		}
-	}
 	pkColumnNumbers := getInsertPKColumns(ins.Columns, table)
 
 	if sel, ok := ins.Rows.(sqlparser.SelectStatement); ok {
 		if ins.OnDup != nil {
 			// Upserts not allowed for subqueries.
 			// http://bugs.mysql.com/bug.php?id=58637
-			plan.Reason = ReasonUpsertSubquery
+			plan.Reason = ReasonUpsert
 			return plan, nil
 		}
 		plan.PlanID = PlanInsertSubquery
 		plan.OuterQuery = GenerateInsertOuterQuery(ins)
 		plan.Subquery = GenerateLimitQuery(sel)
-		for _, col := range ins.Columns {
-			colIndex := table.FindColumn(col)
-			if colIndex == -1 {
-				return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "column %v not found in table %s", col, table.Name)
+		if len(ins.Columns) != 0 {
+			for _, col := range ins.Columns {
+				colIndex := table.FindColumn(col)
+				if colIndex == -1 {
+					return nil, fmt.Errorf("column %v not found in table %s", col, table.Name)
+				}
+				plan.ColumnNumbers = append(plan.ColumnNumbers, colIndex)
 			}
-			plan.ColumnNumbers = append(plan.ColumnNumbers, colIndex)
+		} else {
+			// Add all columns.
+			for colIndex := range table.Columns {
+				plan.ColumnNumbers = append(plan.ColumnNumbers, colIndex)
+			}
 		}
 		plan.SubqueryPKColumns = pkColumnNumbers
 		return plan, nil
@@ -347,104 +311,82 @@ func analyzeInsertNoType(ins *sqlparser.Insert, plan *Plan, table *schema.Table)
 
 	// If it's not a sqlparser.SelectStatement, it's Values.
 	rowList := ins.Rows.(sqlparser.Values)
-	for i := range rowList {
-		if len(rowList[i]) == 0 {
-			for _, col := range table.Columns {
-				expr, err := sqlparser.ExprFromValue(col.Default)
-				if err != nil {
-					return nil, vterrors.Wrap(err, "could not create default row for insert without row values")
-				}
-				rowList[i] = append(rowList[i], expr)
-			}
-			continue
-		}
-		if len(rowList[i]) != len(ins.Columns) {
-			return nil, vterrors.New(vtrpcpb.Code_INVALID_ARGUMENT, "column count doesn't match value count")
-		}
+	pkValues, err := getInsertPKValues(pkColumnNumbers, rowList, table)
+	if err != nil {
+		return nil, err
 	}
-	plan.PKValues = getInsertPKValues(pkColumnNumbers, rowList, table)
-	if plan.PKValues == nil {
+	if pkValues == nil {
 		plan.Reason = ReasonComplexExpr
 		return plan, nil
 	}
-
+	plan.PKValues = pkValues
 	if ins.OnDup == nil {
 		plan.PlanID = PlanInsertPK
-		plan.OuterQuery = sqlparser.NewParsedQuery(ins)
+		plan.OuterQuery = sqlparser.GenerateParsedQuery(ins)
 		return plan, nil
 	}
-
-	// Compute secondary pk values if OnDup changes them.
-	var ok bool
-	plan.SecondaryPKValues, ok = analyzeOnDupExpressions(ins, table.Indexes[0])
-	if !ok {
-		plan.Reason = ReasonPKChange
-		return plan, nil
-	}
-
-	// If the table only has one unique key then it is safe to pass through
-	// a simple upsert unmodified even if there are multiple rows in the
-	// statement. The action is same as a regular insert except that we
-	// may have to publish possible PK changes by OnDup, which would be
-	// recorded in SecondaryPKValues.
-	if table.UniqueIndexes() <= 1 {
-		plan.PlanID = PlanInsertPK
-		plan.OuterQuery = sqlparser.NewParsedQuery(ins)
-		return plan, nil
-	}
-
-	// Otherwise multiple rows are unsupported
 	if len(rowList) > 1 {
-		plan.Reason = ReasonUpsertMultiRow
+		// Upsert supported only for single row inserts.
+		plan.Reason = ReasonUpsert
+		return plan, nil
+	}
+	updateExprs, err := resolveUpsertUpdateValues(rowList[0], ins.Columns, ins.OnDup)
+	if err != nil {
+		plan.Reason = ReasonUpsertColMismatch
+		return plan, nil
+	}
+	plan.SecondaryPKValues, err = analyzeUpdateExpressions(updateExprs, table.Indexes[0])
+	if err != nil {
+		plan.Reason = ReasonPKChange
 		return plan, nil
 	}
 	plan.PlanID = PlanUpsertPK
 	newins := *ins
 	newins.Ignore = ""
 	newins.OnDup = nil
-	plan.OuterQuery = sqlparser.NewParsedQuery(&newins)
+	plan.OuterQuery = sqlparser.GenerateParsedQuery(&newins)
 	upd := &sqlparser.Update{
-		Comments:   ins.Comments,
-		TableExprs: sqlparser.TableExprs{&sqlparser.AliasedTableExpr{Expr: ins.Table}},
-		Exprs:      sqlparser.UpdateExprs(ins.OnDup),
+		Comments: ins.Comments,
+		Table:    &sqlparser.AliasedTableExpr{Expr: ins.Table},
+		Exprs:    updateExprs,
 	}
-
-	// We need to replace 'values' expressions with the actual values they reference.
-	var formatErr error
-	plan.UpsertQuery = GenerateUpdateOuterQuery(upd, func(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
-		if node, ok := node.(*sqlparser.ValuesFuncExpr); ok {
-			colnum := ins.Columns.FindColumn(node.Name)
-			if colnum == -1 {
-				formatErr = vterrors.Errorf(vtrpcpb.Code_NOT_FOUND, "could not find column %v", node.Name)
-				return
-			}
-			buf.Myprintf("(%v)", rowList[0][colnum])
-			return
-		}
-		node.Format(buf)
-	})
-	if formatErr != nil {
-		return nil, formatErr
-	}
+	plan.UpsertQuery = GenerateUpdateOuterQuery(upd)
 	return plan, nil
+}
+
+// resolveUpsertUpdateValues walks the UpdateExprs tree for an upsert, replacing
+// any VALUES(foo) expressions with the correct value from the rowList, in this
+// example the value for column 'foo'
+func resolveUpsertUpdateValues(rowList sqlparser.ValTuple, columns sqlparser.Columns, dup sqlparser.OnDup) (sqlparser.UpdateExprs, error) {
+	err := sqlparser.Walk(func(node sqlparser.SQLNode) (kontinue bool, err error) {
+		if cast, ok := node.(*sqlparser.ValuesFuncExpr); ok {
+			colID := columns.FindColumn(cast.Name)
+			if colID == -1 {
+				return false, fmt.Errorf("Could not find column %v", cast.Name)
+			}
+			cast.Resolved = rowList[colID]
+		}
+		return true, nil
+	}, dup)
+	return sqlparser.UpdateExprs(dup), err
 }
 
 func analyzeInsertMessage(ins *sqlparser.Insert, plan *Plan, table *schema.Table) (*Plan, error) {
 	if _, ok := ins.Rows.(sqlparser.SelectStatement); ok {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "subquery not allowed for message table: %s", table.Name.String())
+		return nil, fmt.Errorf("subquery not allowed for message table: %s", table.Name.String())
 	}
 	if ins.OnDup != nil {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "'on duplicate key' construct not allowed for message table: %s", table.Name.String())
+		return nil, fmt.Errorf("'on duplicate key' construct not allowed for message table: %s", table.Name.String())
 	}
 	if len(ins.Columns) == 0 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "column list must be specified for message table insert: %s", table.Name.String())
+		return nil, fmt.Errorf("column list must be specified for message table insert: %s", table.Name.String())
 	}
 
 	// Sanity check first so we don't have to repeat this.
 	rowList := ins.Rows.(sqlparser.Values)
 	for _, row := range rowList {
 		if len(row) != len(ins.Columns) {
-			return nil, vterrors.New(vtrpcpb.Code_INVALID_ARGUMENT, "column count doesn't match value count")
+			return nil, errors.New("column count doesn't match value count")
 		}
 	}
 
@@ -453,58 +395,73 @@ func analyzeInsertMessage(ins *sqlparser.Insert, plan *Plan, table *schema.Table
 	timeNow := sqlparser.NewValArg([]byte(":#time_now"))
 
 	col := sqlparser.NewColIdent("time_scheduled")
-	scheduleIndex := ins.Columns.FindColumn(col)
+	scheduleIndex := findCol(col, ins.Columns)
 	if scheduleIndex == -1 {
 		scheduleIndex = addVal(ins, col, timeNow)
 	}
 
 	// time_next should be the same as time_scheduled.
 	col = sqlparser.NewColIdent("time_next")
-	num := ins.Columns.FindColumn(col)
+	num := findCol(col, ins.Columns)
 	if num != -1 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "%s must not be specified for message insert", col.String())
+		return nil, fmt.Errorf("%s must not be specified for message insert", col.String())
 	}
 	_ = copyVal(ins, col, scheduleIndex)
 
 	// time_created should always be now.
 	col = sqlparser.NewColIdent("time_created")
-	if num := ins.Columns.FindColumn(col); num >= 0 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "%s must not be specified for message insert", col.String())
+	if num := findCol(col, ins.Columns); num >= 0 {
+		return nil, fmt.Errorf("%s must not be specified for message insert", col.String())
 	}
 	_ = addVal(ins, col, timeNow)
 
 	// epoch should always be 0.
 	col = sqlparser.NewColIdent("epoch")
-	if num := ins.Columns.FindColumn(col); num >= 0 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "%s must not be specified for message insert", col.String())
+	if num := findCol(col, ins.Columns); num >= 0 {
+		return nil, fmt.Errorf("%s must not be specified for message insert", col.String())
 	}
 	_ = addVal(ins, col, sqlparser.NewIntVal([]byte("0")))
 
 	// time_acked should must not be specified.
 	col = sqlparser.NewColIdent("time_acked")
-	if num := ins.Columns.FindColumn(col); num >= 0 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "%s must not be specified for message insert", col.String())
+	if num := findCol(col, ins.Columns); num >= 0 {
+		return nil, fmt.Errorf("%s must not be specified for message insert", col.String())
 	}
 
 	col = sqlparser.NewColIdent("id")
-	num = ins.Columns.FindColumn(col)
+	num = findCol(col, ins.Columns)
 	if num < 0 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "%s must be specified for message insert", col.String())
+		return nil, fmt.Errorf("%s must be specified for message insert", col.String())
+	}
+
+	col = sqlparser.NewColIdent("message")
+	num = findCol(col, ins.Columns)
+	if num < 0 {
+		return nil, fmt.Errorf("%s must be specified for message insert", col.String())
 	}
 
 	pkColumnNumbers := getInsertPKColumns(ins.Columns, table)
-	plan.PKValues = getInsertPKValues(pkColumnNumbers, rowList, table)
-	if plan.PKValues == nil {
+	pkValues, err := getInsertPKValues(pkColumnNumbers, rowList, table)
+	if err != nil {
+		// Dead code. We've already sanity checked the row lengths.
+		return nil, err
+	}
+	if pkValues == nil {
 		// Dead code. The previous checks already catch this condition.
 		plan.Reason = ReasonComplexExpr
 		return plan, nil
 	}
+	plan.PKValues = pkValues
 	plan.PlanID = PlanInsertMessage
-	plan.OuterQuery = sqlparser.NewParsedQuery(ins)
+	plan.OuterQuery = sqlparser.GenerateParsedQuery(ins)
+	plan.MessageReloaderQuery = GenerateLoadMessagesQuery(ins)
 	return plan, nil
 }
 
 func getInsertPKColumns(columns sqlparser.Columns, table *schema.Table) (pkColumnNumbers []int) {
+	if len(columns) == 0 {
+		return table.PKColumns
+	}
 	pkIndex := table.Indexes[0]
 	pkColumnNumbers = make([]int, len(pkIndex.Columns))
 	for i := range pkColumnNumbers {
@@ -518,6 +475,15 @@ func getInsertPKColumns(columns sqlparser.Columns, table *schema.Table) (pkColum
 		pkColumnNumbers[index] = i
 	}
 	return pkColumnNumbers
+}
+
+func findCol(col sqlparser.ColIdent, cols sqlparser.Columns) int {
+	for i, insCol := range cols {
+		if insCol.Equal(col) {
+			return i
+		}
+	}
+	return -1
 }
 
 func addVal(ins *sqlparser.Insert, col sqlparser.ColIdent, expr sqlparser.Expr) int {
@@ -538,78 +504,34 @@ func copyVal(ins *sqlparser.Insert, col sqlparser.ColIdent, colIndex int) int {
 	return len(ins.Columns) - 1
 }
 
-func getInsertPKValues(pkColumnNumbers []int, rowList sqlparser.Values, table *schema.Table) []sqltypes.PlanValue {
-	pkValues := make([]sqltypes.PlanValue, len(pkColumnNumbers))
-	// We iterate by columns (j, i).
-	for j, columnNumber := range pkColumnNumbers {
+func getInsertPKValues(pkColumnNumbers []int, rowList sqlparser.Values, table *schema.Table) (pkValues []interface{}, err error) {
+	pkValues = make([]interface{}, len(pkColumnNumbers))
+	for index, columnNumber := range pkColumnNumbers {
 		if columnNumber == -1 {
-			// No value was specified. Use the default from the schema for all rows.
-			pkValues[j] = sqltypes.PlanValue{Value: table.GetPKColumn(j).Default}
+			pkValues[index] = table.GetPKColumn(index).Default
 			continue
 		}
-		var ok bool
-		pkValues[j], ok = extractColumnValues(rowList, columnNumber)
-		if !ok {
-			return nil
-		}
-	}
-	return pkValues
-}
-
-// analyzeOnDupExpressions analyzes the OnDup and returns the list for any pk value changes.
-func analyzeOnDupExpressions(ins *sqlparser.Insert, pkIndex *schema.Index) (pkValues []sqltypes.PlanValue, ok bool) {
-	rowList := ins.Rows.(sqlparser.Values)
-	for _, expr := range ins.OnDup {
-		index := pkIndex.FindColumn(expr.Name.Name)
-		if index == -1 {
-			continue
-		}
-
-		if pkValues == nil {
-			pkValues = make([]sqltypes.PlanValue, len(pkIndex.Columns))
-		}
-		if vf, ok := expr.Expr.(*sqlparser.ValuesFuncExpr); ok {
-			insertCol := ins.Columns.FindColumn(vf.Name)
-			if insertCol == -1 {
-				return nil, false
+		values := make([]interface{}, len(rowList))
+		for j := 0; j < len(rowList); j++ {
+			row := rowList[j]
+			if columnNumber >= len(row) {
+				return nil, errors.New("column count doesn't match value count")
 			}
-			pkValues[index], ok = extractColumnValues(rowList, insertCol)
-			if !ok {
-				return nil, false
+			node := row[columnNumber]
+			if !sqlparser.IsNull(node) && !sqlparser.IsValue(node) {
+				return nil, nil
 			}
-			continue
+			var err error
+			values[j], err = sqlparser.AsInterface(node)
+			if err != nil {
+				return nil, err
+			}
 		}
-
-		pkValues[index], ok = extractSingleValue(expr.Expr)
-		if !ok {
-			return nil, false
-		}
-	}
-	return pkValues, true
-}
-
-// extractColumnValues extracts the values of a column into a PlanValue.
-func extractColumnValues(rowList sqlparser.Values, colnum int) (sqltypes.PlanValue, bool) {
-	pv := sqltypes.PlanValue{Values: make([]sqltypes.PlanValue, len(rowList))}
-	for i := 0; i < len(rowList); i++ {
-		var ok bool
-		pv.Values[i], ok = extractSingleValue(rowList[i][colnum])
-		if !ok {
-			return pv, false
+		if len(values) == 1 {
+			pkValues[index] = values[0]
+		} else {
+			pkValues[index] = values
 		}
 	}
-	return pv, true
-}
-
-func extractSingleValue(expr sqlparser.Expr) (sqltypes.PlanValue, bool) {
-	pv := sqltypes.PlanValue{}
-	if !sqlparser.IsNull(expr) && !sqlparser.IsValue(expr) {
-		return pv, false
-	}
-	var err error
-	pv, err = sqlparser.NewPlanValue(expr)
-	if err != nil {
-		return pv, false
-	}
-	return pv, true
+	return pkValues, nil
 }

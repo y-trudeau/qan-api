@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletmanager
 
@@ -39,6 +27,7 @@ import (
 	"github.com/youtube/vitess/go/vt/health"
 	"github.com/youtube/vitess/go/vt/servenv"
 	"github.com/youtube/vitess/go/vt/topo"
+	"github.com/youtube/vitess/go/vt/topotools"
 
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 )
@@ -139,7 +128,6 @@ func ConfigHTML() template.HTML {
 // for real vttablet agents (not by tests, nor vtcombo).
 func (agent *ActionAgent) initHealthCheck() {
 	registerReplicationReporter(agent)
-	registerHeartbeatReporter(agent.QueryServiceControl)
 
 	log.Infof("Starting periodic health check every %v", *healthCheckInterval)
 	t := timer.NewTimer(*healthCheckInterval)
@@ -170,11 +158,8 @@ func (agent *ActionAgent) initHealthCheck() {
 // This will not change the TabletControl record, but will use it
 // to see if we should be running the query service.
 func (agent *ActionAgent) runHealthCheck() {
-	if err := agent.lock(agent.batchCtx); err != nil {
-		log.Warningf("cannot lock actionMutex, not running HealthCheck")
-		return
-	}
-	defer agent.unlock()
+	agent.actionMutex.Lock()
+	defer agent.actionMutex.Unlock()
 
 	agent.runHealthCheckLocked()
 }
@@ -241,11 +226,8 @@ func (agent *ActionAgent) runHealthCheckLocked() {
 			_ /* state changed */, healthErr = agent.QueryServiceControl.SetServingType(tablet.Type, true, nil)
 
 			if healthErr == nil {
-				// We were unhealthy, are now healthy,
+				// we were unhealthy, are now healthy,
 				// make sure we have the right mysql port.
-				// Also make sure to display any error message.
-				agent.gotMysqlPort = false
-				agent.waitingForMysql = false
 				if updatedTablet := agent.checkTabletMysqlPort(agent.batchCtx, tablet); updatedTablet != nil {
 					agent.setTablet(updatedTablet)
 					tablet = updatedTablet
@@ -289,11 +271,38 @@ func (agent *ActionAgent) runHealthCheckLocked() {
 	record.ReplicationDelay = replicationDelay
 	agent.History.Add(record)
 
-	// Try to figure out the mysql port if we don't have it yet.
-	if !agent.gotMysqlPort {
-		if updatedTablet := agent.checkTabletMysqlPort(agent.batchCtx, tablet); updatedTablet != nil {
-			agent.setTablet(updatedTablet)
-			tablet = updatedTablet
+	// try to figure out the mysql port if we don't have it yet
+	if _, ok := tablet.PortMap["mysql"]; !ok && !agent.skipMysqlPortCheck {
+		// we don't know the port, try to get it from mysqld
+		mysqlPort, err := agent.MysqlDaemon.GetMysqlPort()
+		if err != nil {
+			// Don't log if we're already in a waiting-for-mysql state.
+			agent.mutex.Lock()
+			if !agent._waitingForMysql {
+				log.Warningf("Can't get mysql port, won't populate Tablet record in topology (will retry silently at healthcheck interval %v): %v", *healthCheckInterval, err)
+				agent._waitingForMysql = true
+			}
+			agent.mutex.Unlock()
+		} else {
+			log.Infof("Updating tablet mysql port to %v", mysqlPort)
+			_, err := agent.TopoServer.UpdateTabletFields(agent.batchCtx, tablet.Alias,
+				func(tablet *topodatapb.Tablet) error {
+					if err := topotools.CheckOwnership(agent.initialTablet, tablet); err != nil {
+						return err
+					}
+					tablet.PortMap["mysql"] = mysqlPort
+					return nil
+				})
+			if err != nil {
+				log.Infof("Error updating mysql port in tablet record (will try again at healthcheck interval): %v", err)
+			} else {
+				// save the port so we don't update it again next time
+				// we do the health check.
+				agent.mutex.Lock()
+				agent._tablet.PortMap["mysql"] = mysqlPort
+				agent._waitingForMysql = false
+				agent.mutex.Unlock()
+			}
 		}
 	}
 
@@ -312,9 +321,8 @@ func (agent *ActionAgent) runHealthCheckLocked() {
 // We will clean up our state, and set query service to lame duck mode.
 // We only do something if we are in a serving state, and not a master.
 func (agent *ActionAgent) terminateHealthChecks() {
-	// No need to check for error, only a canceled batchCtx would fail this.
-	agent.lock(agent.batchCtx)
-	defer agent.unlock()
+	agent.actionMutex.Lock()
+	defer agent.actionMutex.Unlock()
 	log.Info("agent.terminateHealthChecks is starting")
 
 	// read the current tablet record

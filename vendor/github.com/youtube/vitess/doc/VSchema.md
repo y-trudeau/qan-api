@@ -35,8 +35,6 @@ Vindexes offer many flexibilities:
 
 The Primary Vindex is analogous to a database primary key. Every sharded table must have one defined. A Primary Vindex must be unique: given an input value, it must produce a single keyspace ID. This unique mapping will be used at the time of insert to decide the target shard for a row. Conceptually, this is also equivalent to the NoSQL Sharding Key, and we often refer to the Primary Vindex as the Sharding Key.
 
-Uniqueness for a Primary Vindex does not mean that the column has to be a primary key or unique in the MySQL schema. You can have multiple rows that map to the same keyspace ID. The Vindex uniqueness constraint is only used to make sure that all rows for a keyspace ID live in the same shard.
-
 However, there is a subtle difference: NoSQL datastores let you choose the Sharding Key, but the Sharding Scheme is generally hardcoded in the engine. In Vitess, the choice of Vindex lets you control how a column value maps to a keyspace ID. In other words, a Primary Vindex in Vitess not only defines the Sharding Key, it also decides the Sharding Scheme.
 
 Vindexes come in many varieties. Some of them can be used as Primary Vindex, and others have different purposes. The following sections will describe their properties.
@@ -138,7 +136,7 @@ Custom vindexes can also be plugged in as needed.
 
 ## Sequences
 
-Auto-increment columns do not work very well for sharded tables. [Vitess sequences]({% link user-guide/vitess-sequences.md %}) solve this problem. Sequence tables must be specified in the VSchema, and then tied to table columns. At the time of insert, if no value is specified for such a column, VTGate will generate a number for it using the sequence table.
+Auto-increment columns do not work very well for sharded tables. [Vitess sequences](/user-guide/vitess-sequences.html) solve this problem. Sequence tables must be specified in the VSchema, and then tied to table columns. At the time of insert, if no value is specified for such a column, VTGate will generate a number for it using the sequence table.
 
 ## VSchema
 

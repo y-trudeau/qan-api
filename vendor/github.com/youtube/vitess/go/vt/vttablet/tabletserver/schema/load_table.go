@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package schema
 
@@ -24,7 +12,6 @@ import (
 
 	log "github.com/golang/glog"
 
-	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/connpool"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
@@ -70,30 +57,13 @@ func fetchColumns(ta *Table, conn *connpool.DBConn, sqlTableName string) error {
 		return err
 	}
 	for _, row := range columns.Rows {
-		name := row[0].ToString()
+		name := row[0].String()
 		columnType, ok := fieldTypes[name]
 		if !ok {
-			// This code is unreachable.
 			log.Warningf("Table: %s, column %s not found in select list, skipping.", ta.Name, name)
 			continue
 		}
-		// BIT data type default value representation differs from how
-		// it's returned. It's represented as b'101', but returned in
-		// its binary form. Extract the binary form.
-		if columnType == querypb.Type_BIT && row[4].ToString() != "" {
-			query := fmt.Sprintf("select %s", row[4].ToString())
-			r, err := conn.Exec(tabletenv.LocalContext(), query, 10000, false)
-			if err != nil {
-				return err
-			}
-			if len(r.Rows) != 1 || len(r.Rows[0]) != 1 {
-				// This code is unreachable.
-				return fmt.Errorf("Invalid rows returned from %s: %v", query, r.Rows)
-			}
-			// overwrite the original value with the new one.
-			row[4] = r.Rows[0][0]
-		}
-		ta.AddColumn(name, columnType, row[4], row[5].ToString())
+		ta.AddColumn(name, columnType, row[4], row[5].String())
 	}
 	return nil
 }
@@ -106,47 +76,37 @@ func fetchIndexes(ta *Table, conn *connpool.DBConn, sqlTableName string) error {
 	var currentIndex *Index
 	currentName := ""
 	for _, row := range indexes.Rows {
-		indexName := row[2].ToString()
+		indexName := row[2].String()
 		if currentName != indexName {
-			currentIndex = ta.AddIndex(indexName, row[1].ToString() == "0")
+			currentIndex = ta.AddIndex(indexName)
 			currentName = indexName
 		}
 		var cardinality uint64
 		if !row[6].IsNull() {
-			cardinality, err = sqltypes.ToUint64(row[6])
+			cardinality, err = strconv.ParseUint(row[6].String(), 0, 64)
 			if err != nil {
 				log.Warningf("%s", err)
 			}
 		}
-		currentIndex.AddColumn(row[4].ToString(), cardinality)
+		currentIndex.AddColumn(row[4].String(), cardinality)
 	}
 	ta.Done()
 	return nil
 }
 
 func loadMessageInfo(ta *Table, comment string) error {
-	findCols := map[string]struct{}{
-		"id":             {},
-		"time_scheduled": {},
-		"time_next":      {},
-		"epoch":          {},
-		"time_created":   {},
-		"time_acked":     {},
-	}
-
-	// orderedColumns are necessary to ensure that they
-	// get added in the correct order to fields if they
-	// need to be returned with the stream.
-	orderedColumns := []string{
-		"id",
+	findCols := []string{
 		"time_scheduled",
+		"id",
 		"time_next",
 		"epoch",
 		"time_created",
 		"time_acked",
+		"message",
 	}
-
-	ta.MessageInfo = &MessageInfo{}
+	ta.MessageInfo = &MessageInfo{
+		Fields: make([]*querypb.Field, 2),
+	}
 	// Extract keyvalues.
 	keyvals := make(map[string]string)
 	inputs := strings.Split(comment, ",")
@@ -173,48 +133,31 @@ func loadMessageInfo(ta *Table, comment string) error {
 	if ta.MessageInfo.PollInterval, err = getDuration(keyvals, "vt_poller_interval"); err != nil {
 		return err
 	}
-	for _, col := range orderedColumns {
+	for _, col := range findCols {
 		num := ta.FindColumn(sqlparser.NewColIdent(col))
 		if num == -1 {
 			return fmt.Errorf("%s missing from message table: %s", col, ta.Name.String())
 		}
-
-		// id and time_scheduled must be the first two columns.
-		if col == "id" || col == "time_scheduled" {
-			ta.MessageInfo.Fields = append(ta.MessageInfo.Fields, &querypb.Field{
+		switch col {
+		case "id":
+			ta.MessageInfo.Fields[0] = &querypb.Field{
 				Name: ta.Columns[num].Name.String(),
 				Type: ta.Columns[num].Type,
-			})
+			}
+		case "message":
+			ta.MessageInfo.Fields[1] = &querypb.Field{
+				Name: ta.Columns[num].Name.String(),
+				Type: ta.Columns[num].Type,
+			}
 		}
 	}
-
-	// Store the position of the id column in the PK
-	// list. This is required to handle arbitrary updates.
-	// In such cases, we have to be able to identify the
-	// affected id and invalidate the message cache.
-	ta.MessageInfo.IDPKIndex = -1
 	for i, j := range ta.PKColumns {
 		if ta.Columns[j].Name.EqualString("id") {
 			ta.MessageInfo.IDPKIndex = i
-			break
+			return nil
 		}
 	}
-	if ta.MessageInfo.IDPKIndex == -1 {
-		return fmt.Errorf("id column is not part of the primary key for message table: %s", ta.Name.String())
-	}
-
-	// Load user-defined columns. Any "unrecognized" column is user-defined.
-	for _, c := range ta.Columns {
-		if _, ok := findCols[c.Name.Lowered()]; ok {
-			continue
-		}
-
-		ta.MessageInfo.Fields = append(ta.MessageInfo.Fields, &querypb.Field{
-			Name: c.Name.String(),
-			Type: c.Type,
-		})
-	}
-	return nil
+	return fmt.Errorf("id column is not part of the primary key for message table: %s", ta.Name.String())
 }
 
 func getDuration(in map[string]string, key string) (time.Duration, error) {

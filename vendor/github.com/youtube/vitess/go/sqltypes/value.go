@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 // Package sqltypes implements interfaces and types that represent SQL values.
 package sqltypes
@@ -20,10 +8,11 @@ package sqltypes
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
-	"github.com/youtube/vitess/go/bytes2"
 	"github.com/youtube/vitess/go/hack"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
@@ -32,11 +21,9 @@ import (
 var (
 	// NULL represents the NULL value.
 	NULL = Value{}
-
 	// DontEscape tells you if a character should not be escaped.
 	DontEscape = byte(255)
-
-	nullstr = []byte("null")
+	nullstr    = []byte("null")
 )
 
 // BinWriter interface is used for encoding values.
@@ -45,6 +32,7 @@ var (
 // So, we don't expect the write operations to fail.
 type BinWriter interface {
 	Write([]byte) (int, error)
+	WriteByte(byte) error
 }
 
 // Value can store any SQL value. If the value represents
@@ -55,39 +43,12 @@ type Value struct {
 	val []byte
 }
 
-// NewValue builds a Value using typ and val. If the value and typ
-// don't match, it returns an error.
-func NewValue(typ querypb.Type, val []byte) (v Value, err error) {
-	switch {
-	case IsSigned(typ):
-		if _, err := strconv.ParseInt(string(val), 0, 64); err != nil {
-			return NULL, err
-		}
-		return MakeTrusted(typ, val), nil
-	case IsUnsigned(typ):
-		if _, err := strconv.ParseUint(string(val), 0, 64); err != nil {
-			return NULL, err
-		}
-		return MakeTrusted(typ, val), nil
-	case IsFloat(typ) || typ == Decimal:
-		if _, err := strconv.ParseFloat(string(val), 64); err != nil {
-			return NULL, err
-		}
-		return MakeTrusted(typ, val), nil
-	case IsQuoted(typ) || typ == Null:
-		return MakeTrusted(typ, val), nil
-	}
-	// All other types are unsafe or invalid.
-	return NULL, fmt.Errorf("invalid type specified for MakeValue: %v", typ)
-}
-
 // MakeTrusted makes a new Value based on the type.
-// This function should only be used if you know the value
-// and type conform to the rules. Every place this function is
+// If the value is an integral, then val must be in its cannonical
+// form. This function should only be used if you know the value
+// and type conform to the rules.  Every place this function is
 // called, a comment is needed that explains why it's justified.
-// Exceptions: The current package and mysql package do not need
-// comments. Other packages can also use the function to create
-// VarBinary or VarChar values.
+// Functions within this package are exempt.
 func MakeTrusted(typ querypb.Type, val []byte) Value {
 	if typ == Null {
 		return NULL
@@ -95,40 +56,117 @@ func MakeTrusted(typ querypb.Type, val []byte) Value {
 	return Value{typ: typ, val: val}
 }
 
-// NewInt64 builds an Int64 Value.
-func NewInt64(v int64) Value {
-	return MakeTrusted(Int64, strconv.AppendInt(nil, v, 10))
+// MakeString makes a VarBinary Value.
+func MakeString(val []byte) Value {
+	return MakeTrusted(VarBinary, val)
 }
 
-// NewInt32 builds an Int64 Value.
-func NewInt32(v int32) Value {
-	return MakeTrusted(Int32, strconv.AppendInt(nil, int64(v), 10))
+// BuildValue builds a value from any go type. sqltype.Value is
+// also allowed.
+func BuildValue(goval interface{}) (v Value, err error) {
+	// Look for the most common types first.
+	switch goval := goval.(type) {
+	case nil:
+		// no op
+	case []byte:
+		v = MakeTrusted(VarBinary, goval)
+	case int64:
+		v = MakeTrusted(Int64, strconv.AppendInt(nil, int64(goval), 10))
+	case uint64:
+		v = MakeTrusted(Uint64, strconv.AppendUint(nil, uint64(goval), 10))
+	case float64:
+		v = MakeTrusted(Float64, strconv.AppendFloat(nil, goval, 'f', -1, 64))
+	case int:
+		v = MakeTrusted(Int64, strconv.AppendInt(nil, int64(goval), 10))
+	case int8:
+		v = MakeTrusted(Int8, strconv.AppendInt(nil, int64(goval), 10))
+	case int16:
+		v = MakeTrusted(Int16, strconv.AppendInt(nil, int64(goval), 10))
+	case int32:
+		v = MakeTrusted(Int32, strconv.AppendInt(nil, int64(goval), 10))
+	case uint:
+		v = MakeTrusted(Uint64, strconv.AppendUint(nil, uint64(goval), 10))
+	case uint8:
+		v = MakeTrusted(Uint8, strconv.AppendUint(nil, uint64(goval), 10))
+	case uint16:
+		v = MakeTrusted(Uint16, strconv.AppendUint(nil, uint64(goval), 10))
+	case uint32:
+		v = MakeTrusted(Uint32, strconv.AppendUint(nil, uint64(goval), 10))
+	case float32:
+		v = MakeTrusted(Float32, strconv.AppendFloat(nil, float64(goval), 'f', -1, 64))
+	case string:
+		v = MakeTrusted(VarBinary, []byte(goval))
+	case time.Time:
+		v = MakeTrusted(Datetime, []byte(goval.Format("2006-01-02 15:04:05")))
+	case Value:
+		v = goval
+	case *querypb.BindVariable:
+		return ValueFromBytes(goval.Type, goval.Value)
+	default:
+		return v, fmt.Errorf("unexpected type %T: %v", goval, goval)
+	}
+	return v, nil
 }
 
-// NewUint64 builds an Uint64 Value.
-func NewUint64(v uint64) Value {
-	return MakeTrusted(Uint64, strconv.AppendUint(nil, v, 10))
+// BuildConverted is like BuildValue except that it tries to
+// convert a string or []byte to an integral if the target type
+// is an integral. We don't perform other implicit conversions
+// because they're unsafe.
+func BuildConverted(typ querypb.Type, goval interface{}) (v Value, err error) {
+	if IsIntegral(typ) {
+		switch goval := goval.(type) {
+		case []byte:
+			return ValueFromBytes(typ, goval)
+		case string:
+			return ValueFromBytes(typ, []byte(goval))
+		case Value:
+			if goval.IsQuoted() {
+				return ValueFromBytes(typ, goval.Raw())
+			}
+		case *querypb.BindVariable:
+			if IsQuoted(goval.Type) {
+				return ValueFromBytes(typ, goval.Value)
+			}
+		}
+	}
+	return BuildValue(goval)
 }
 
-// NewFloat64 builds an Float64 Value.
-func NewFloat64(v float64) Value {
-	return MakeTrusted(Float64, strconv.AppendFloat(nil, v, 'g', -1, 64))
+// ValueFromBytes builds a Value using typ and val. It ensures that val
+// matches the requested type. If type is an integral it's converted to
+// a cannonical form. Otherwise, the original representation is preserved.
+func ValueFromBytes(typ querypb.Type, val []byte) (v Value, err error) {
+	switch {
+	case IsSigned(typ):
+		signed, err := strconv.ParseInt(string(val), 0, 64)
+		if err != nil {
+			return NULL, err
+		}
+		v = MakeTrusted(typ, strconv.AppendInt(nil, signed, 10))
+	case IsUnsigned(typ):
+		unsigned, err := strconv.ParseUint(string(val), 0, 64)
+		if err != nil {
+			return NULL, err
+		}
+		v = MakeTrusted(typ, strconv.AppendUint(nil, unsigned, 10))
+	case typ == Tuple:
+		return NULL, errors.New("tuple not allowed for ValueFromBytes")
+	case IsFloat(typ) || typ == Decimal:
+		_, err := strconv.ParseFloat(string(val), 64)
+		if err != nil {
+			return NULL, err
+		}
+		// After verification, we preserve the original representation.
+		fallthrough
+	default:
+		v = MakeTrusted(typ, val)
+	}
+	return v, nil
 }
 
-// NewVarChar builds a VarChar Value.
-func NewVarChar(v string) Value {
-	return MakeTrusted(VarChar, []byte(v))
-}
-
-// NewVarBinary builds a VarBinary Value.
-// The input is a string because it's the most common use case.
-func NewVarBinary(v string) Value {
-	return MakeTrusted(VarBinary, []byte(v))
-}
-
-// NewIntegral builds an integral type from a string representaion.
+// BuildIntegral builds an integral type from a string representaion.
 // The type will be Int64 or Uint64. Int64 will be preferred where possible.
-func NewIntegral(val string) (n Value, err error) {
+func BuildIntegral(val string) (n Value, err error) {
 	signed, err := strconv.ParseInt(val, 0, 64)
 	if err == nil {
 		return MakeTrusted(Int64, strconv.AppendInt(nil, signed, 10)), nil
@@ -140,49 +178,15 @@ func NewIntegral(val string) (n Value, err error) {
 	return MakeTrusted(Uint64, strconv.AppendUint(nil, unsigned, 10)), nil
 }
 
-// InterfaceToValue builds a value from a go type.
-// Supported types are nil, int64, uint64, float64,
-// string and []byte.
-// This function is deprecated. Use the type-specific
-// functions instead.
-func InterfaceToValue(goval interface{}) (Value, error) {
-	switch goval := goval.(type) {
-	case nil:
-		return NULL, nil
-	case []byte:
-		return MakeTrusted(VarBinary, goval), nil
-	case int64:
-		return NewInt64(goval), nil
-	case uint64:
-		return NewUint64(goval), nil
-	case float64:
-		return NewFloat64(goval), nil
-	case string:
-		return NewVarChar(goval), nil
-	default:
-		return NULL, fmt.Errorf("unexpected type %T: %v", goval, goval)
-	}
-}
-
 // Type returns the type of Value.
 func (v Value) Type() querypb.Type {
 	return v.typ
 }
 
-// Raw returns the internal represenation of the value. For newer types,
-// this may not match MySQL's representation.
+// Raw returns the raw bytes. All types are currently implemented as []byte.
+// You should avoid using this function. If you do, you should treat the
+// bytes as read-only.
 func (v Value) Raw() []byte {
-	return v.val
-}
-
-// ToBytes returns the value as MySQL would return it as []byte.
-// In contrast, Raw returns the internal representation of the Value, which may not
-// match MySQL's representation for newer types.
-// If the value is not convertible like in the case of Expression, it returns nil.
-func (v Value) ToBytes() []byte {
-	if v.typ == Expression {
-		return nil
-	}
 	return v.val
 }
 
@@ -191,47 +195,88 @@ func (v Value) Len() int {
 	return len(v.val)
 }
 
-// ToString returns the value as MySQL would return it as string.
-// If the value is not convertible like in the case of Expression, it returns nil.
-func (v Value) ToString() string {
-	if v.typ == Expression {
-		return ""
-	}
+// String returns the raw value as a string.
+func (v Value) String() string {
 	return hack.String(v.val)
 }
 
-// String returns a printable version of the value.
-func (v Value) String() string {
-	if v.typ == Null {
-		return "NULL"
+// ToNative converts Value to a native go type.
+// This does not work for sqltypes.Tuple. The function
+// panics if there are inconsistencies.
+func (v Value) ToNative() interface{} {
+	var out interface{}
+	var err error
+	switch {
+	case v.typ == Null:
+		// no-op
+	case IsSigned(v.typ):
+		out, err = v.ParseInt64()
+	case IsUnsigned(v.typ):
+		out, err = v.ParseUint64()
+	case IsFloat(v.typ):
+		out, err = v.ParseFloat64()
+	case v.typ == Tuple:
+		err = errors.New("unexpected tuple")
+	default:
+		out = v.val
 	}
-	if v.IsQuoted() {
-		return fmt.Sprintf("%v(%q)", v.typ, v.val)
+	if err != nil {
+		panic(err)
 	}
-	return fmt.Sprintf("%v(%s)", v.typ, v.val)
+	return out
+}
+
+// ToProtoValue converts Value to a querypb.Value.
+func (v Value) ToProtoValue() *querypb.Value {
+	return &querypb.Value{
+		Type:  v.typ,
+		Value: v.val,
+	}
+}
+
+// ParseInt64 will parse a Value into an int64. It does
+// not check the type.
+func (v Value) ParseInt64() (val int64, err error) {
+	return strconv.ParseInt(v.String(), 10, 64)
+}
+
+// ParseUint64 will parse a Value into a uint64. It does
+// not check the type.
+func (v Value) ParseUint64() (val uint64, err error) {
+	return strconv.ParseUint(v.String(), 10, 64)
+}
+
+// ParseFloat64 will parse a Value into an float64. It does
+// not check the type.
+func (v Value) ParseFloat64() (val float64, err error) {
+	return strconv.ParseFloat(v.String(), 64)
 }
 
 // EncodeSQL encodes the value into an SQL statement. Can be binary.
 func (v Value) EncodeSQL(b BinWriter) {
+	// ToNative panics if v is invalid.
+	_ = v.ToNative()
 	switch {
 	case v.typ == Null:
-		b.Write(nullstr)
-	case v.IsQuoted():
+		writebytes(nullstr, b)
+	case IsQuoted(v.typ):
 		encodeBytesSQL(v.val, b)
 	default:
-		b.Write(v.val)
+		writebytes(v.val, b)
 	}
 }
 
 // EncodeASCII encodes the value using 7-bit clean ascii bytes.
 func (v Value) EncodeASCII(b BinWriter) {
+	// ToNative panics if v is invalid.
+	_ = v.ToNative()
 	switch {
 	case v.typ == Null:
-		b.Write(nullstr)
-	case v.IsQuoted():
+		writebytes(nullstr, b)
+	case IsQuoted(v.typ):
 		encodeBytesASCII(v.val, b)
 	default:
-		b.Write(v.val)
+		writebytes(v.val, b)
 	}
 }
 
@@ -280,7 +325,7 @@ func (v Value) IsBinary() bool {
 func (v Value) MarshalJSON() ([]byte, error) {
 	switch {
 	case v.IsQuoted():
-		return json.Marshal(v.ToString())
+		return json.Marshal(v.String())
 	case v.typ == Null:
 		return nullstr, nil
 	}
@@ -314,33 +359,45 @@ func (v *Value) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return err
 	}
-	*v, err = InterfaceToValue(val)
+	*v, err = BuildValue(val)
 	return err
 }
 
 func encodeBytesSQL(val []byte, b BinWriter) {
-	buf := &bytes2.Buffer{}
-	buf.WriteByte('\'')
+	writebyte('\'', b)
 	for _, ch := range val {
 		if encodedChar := SQLEncodeMap[ch]; encodedChar == DontEscape {
-			buf.WriteByte(ch)
+			writebyte(ch, b)
 		} else {
-			buf.WriteByte('\\')
-			buf.WriteByte(encodedChar)
+			writebyte('\\', b)
+			writebyte(encodedChar, b)
 		}
 	}
-	buf.WriteByte('\'')
-	b.Write(buf.Bytes())
+	writebyte('\'', b)
 }
 
 func encodeBytesASCII(val []byte, b BinWriter) {
-	buf := &bytes2.Buffer{}
-	buf.WriteByte('\'')
-	encoder := base64.NewEncoder(base64.StdEncoding, buf)
+	writebyte('\'', b)
+	encoder := base64.NewEncoder(base64.StdEncoding, b)
 	encoder.Write(val)
 	encoder.Close()
-	buf.WriteByte('\'')
-	b.Write(buf.Bytes())
+	writebyte('\'', b)
+}
+
+func writebyte(c byte, b BinWriter) {
+	if err := b.WriteByte(c); err != nil {
+		panic(err)
+	}
+}
+
+func writebytes(val []byte, b BinWriter) {
+	n, err := b.Write(val)
+	if err != nil {
+		panic(err)
+	}
+	if n != len(val) {
+		panic(errors.New("short write"))
+	}
 }
 
 // SQLEncodeMap specifies how to escape binary data with '\'.

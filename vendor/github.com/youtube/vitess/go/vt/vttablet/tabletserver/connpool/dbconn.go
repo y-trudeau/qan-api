@@ -1,29 +1,17 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package connpool
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	log "github.com/golang/glog"
-	"github.com/youtube/vitess/go/mysql"
+	"github.com/youtube/vitess/go/mysqlconn"
+	"github.com/youtube/vitess/go/sqldb"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/sync2"
 	"github.com/youtube/vitess/go/trace"
@@ -33,16 +21,6 @@ import (
 	"golang.org/x/net/context"
 )
 
-// BinlogFormat is used for for specifying the binlog format.
-type BinlogFormat int
-
-// The following constants specify the possible binlog format values.
-const (
-	BinlogFormatStatement BinlogFormat = iota
-	BinlogFormatRow
-	BinlogFormatMixed
-)
-
 // DBConn is a db connection for tabletserver.
 // It performs automatic reconnects as needed.
 // Its Execute function has a timeout that can kill
@@ -50,7 +28,7 @@ const (
 // It will also trigger a CheckMySQL whenever applicable.
 type DBConn struct {
 	conn    *dbconnpool.DBConnection
-	info    *mysql.ConnParams
+	info    *sqldb.ConnParams
 	pool    *Pool
 	current sync2.AtomicString
 }
@@ -58,7 +36,8 @@ type DBConn struct {
 // NewDBConn creates a new DBConn. It triggers a CheckMySQL if creation fails.
 func NewDBConn(
 	cp *Pool,
-	appParams *mysql.ConnParams) (*DBConn, error) {
+	appParams,
+	dbaParams *sqldb.ConnParams) (*DBConn, error) {
 	c, err := dbconnpool.NewDBConnection(appParams, tabletenv.MySQLStats)
 	if err != nil {
 		cp.checker.CheckMySQL()
@@ -68,19 +47,6 @@ func NewDBConn(
 		conn: c,
 		info: appParams,
 		pool: cp,
-	}, nil
-}
-
-// NewDBConnNoPool creates a new DBConn without a pool.
-func NewDBConnNoPool(params *mysql.ConnParams) (*DBConn, error) {
-	c, err := dbconnpool.NewDBConnection(params, tabletenv.MySQLStats)
-	if err != nil {
-		return nil, err
-	}
-	return &DBConn{
-		conn: c,
-		info: params,
-		pool: nil,
 	}, nil
 }
 
@@ -96,7 +62,7 @@ func (dbc *DBConn) Exec(ctx context.Context, query string, maxrows int, wantfiel
 		switch {
 		case err == nil:
 			return r, nil
-		case !mysql.IsConnErr(err):
+		case !mysqlconn.IsConnErr(err):
 			// MySQL error that isn't due to a connection issue
 			return nil, err
 		case attempt == 2:
@@ -164,7 +130,7 @@ func (dbc *DBConn) Stream(ctx context.Context, query string, callback func(*sqlt
 		switch {
 		case err == nil:
 			return nil
-		case !mysql.IsConnErr(err) || resultSent || attempt == 2:
+		case !mysqlconn.IsConnErr(err) || resultSent || attempt == 2:
 			// MySQL error that isn't due to a connection issue
 			return err
 		}
@@ -191,57 +157,9 @@ func (dbc *DBConn) streamOnce(ctx context.Context, query string, callback func(*
 	return dbc.conn.ExecuteStreamFetch(query, callback, streamBufferSize)
 }
 
-var (
-	getModeSQL    = "select @@global.sql_mode"
-	getAutocommit = "select @@autocommit"
-	showBinlog    = "show variables like 'binlog_format'"
-)
-
-// VerifyMode is a helper method to verify mysql is running with
-// sql_mode = STRICT_TRANS_TABLES and autocommit=ON. It also returns
-// the current binlog format.
-func (dbc *DBConn) VerifyMode(strictTransTables bool) (BinlogFormat, error) {
-	if strictTransTables {
-		qr, err := dbc.conn.ExecuteFetch(getModeSQL, 2, false)
-		if err != nil {
-			return 0, fmt.Errorf("could not verify mode: %v", err)
-		}
-		if len(qr.Rows) != 1 {
-			return 0, fmt.Errorf("incorrect rowcount received for %s: %d", getModeSQL, len(qr.Rows))
-		}
-		if !strings.Contains(qr.Rows[0][0].ToString(), "STRICT_TRANS_TABLES") {
-			return 0, fmt.Errorf("require sql_mode to be STRICT_TRANS_TABLES: got '%s'", qr.Rows[0][0].ToString())
-		}
-	}
-	qr, err := dbc.conn.ExecuteFetch(getAutocommit, 2, false)
-	if err != nil {
-		return 0, fmt.Errorf("could not verify mode: %v", err)
-	}
-	if len(qr.Rows) != 1 {
-		return 0, fmt.Errorf("incorrect rowcount received for %s: %d", getAutocommit, len(qr.Rows))
-	}
-	if !strings.Contains(qr.Rows[0][0].ToString(), "1") {
-		return 0, fmt.Errorf("require autocommit to be 1: got %s", qr.Rows[0][0].ToString())
-	}
-	qr, err = dbc.conn.ExecuteFetch(showBinlog, 10, false)
-	if err != nil {
-		return 0, fmt.Errorf("could not fetch binlog format: %v", err)
-	}
-	if len(qr.Rows) != 1 {
-		return 0, fmt.Errorf("incorrect rowcount received for %s: %d", showBinlog, len(qr.Rows))
-	}
-	if len(qr.Rows[0]) != 2 {
-		return 0, fmt.Errorf("incorrect column count received for %s: %d", showBinlog, len(qr.Rows[0]))
-	}
-	switch qr.Rows[0][1].ToString() {
-	case "STATEMENT":
-		return BinlogFormatStatement, nil
-	case "ROW":
-		return BinlogFormatRow, nil
-	case "MIXED":
-		return BinlogFormatMixed, nil
-	}
-	return 0, fmt.Errorf("unexpected binlog format for %s: %s", showBinlog, qr.Rows[0][1].ToString())
+// VerifyMode returns an error if the connection mode is incorrect.
+func (dbc *DBConn) VerifyMode() error {
+	return dbc.conn.VerifyMode()
 }
 
 // Close closes the DBConn.
@@ -256,12 +174,9 @@ func (dbc *DBConn) IsClosed() bool {
 
 // Recycle returns the DBConn to the pool.
 func (dbc *DBConn) Recycle() {
-	switch {
-	case dbc.pool == nil:
-		dbc.Close()
-	case dbc.conn.IsClosed():
+	if dbc.conn.IsClosed() {
 		dbc.pool.Put(nil)
-	default:
+	} else {
 		dbc.pool.Put(dbc)
 	}
 }

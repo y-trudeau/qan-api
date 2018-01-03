@@ -1,36 +1,18 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package buffer
 
 import (
+	"context"
 	"fmt"
 	"runtime/debug"
 	"sync"
 	"time"
 
 	log "github.com/golang/glog"
-	"golang.org/x/net/context"
 
 	"github.com/youtube/vitess/go/sync2"
 	"github.com/youtube/vitess/go/vt/logutil"
 	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/vterrors"
-
-	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 )
 
 // bufferState represents the different states a shardBuffer object can be in.
@@ -59,7 +41,6 @@ type shardBuffer struct {
 	mode     bufferMode
 	keyspace string
 	shard    string
-	now      func() time.Time
 	// bufferSizeSema is the shared pool of slots. See "Buffer.bufferSizeSema".
 	bufferSizeSema *sync2.Semaphore
 	// statsKey is used to update the stats variables.
@@ -73,23 +54,18 @@ type shardBuffer struct {
 	state bufferState
 	// queue is the list of buffered requests (ordered by arrival).
 	queue []*entry
-	// externallyReparented is the maximum value of all seen
-	// "StreamHealthResponse.TabletexternallyReparentedTimestamp" values across
-	// all MASTER tablets of this shard.
-	// In practice, it is a) the last time the shard was reparented or b) the last
-	// time the TabletExternallyReparented RPC was called on the tablet to confirm
-	// that the tablet is the current MASTER.
+	// externallyReparented tracks the last time each shard was reparented.
+	// The value is the seen maximum value of
+	// "StreamHealthResponse.TabletexternallyReparentedTimestamp".
 	// We assume the value is a Unix timestamp in seconds.
 	externallyReparented int64
+	// externallyReparentedAfterStart is the first non-zero value which vtgate
+	// saw after startup. It's necessary for the "reparent too recent" check.
+	externallyReparentedAfterStart int64
 	// lastStart is the last time we saw the start of a failover.
 	lastStart time.Time
 	// lastEnd is the last time we saw the end of a failover.
 	lastEnd time.Time
-	// lastReparent is the last time we saw that the tablet alias of the MASTER
-	// changed i.e. we definitely reparented to a different tablet.
-	lastReparent time.Time
-	// currentMaster is tracked to determine when to update "lastReparent".
-	currentMaster *topodatapb.TabletAlias
 	// timeoutThread will be set while a failover is in progress and the object is
 	// in the BUFFERING state.
 	timeoutThread *timeoutThread
@@ -120,7 +96,7 @@ type entry struct {
 	bufferCancel func()
 }
 
-func newShardBuffer(mode bufferMode, keyspace, shard string, now func() time.Time, bufferSizeSema *sync2.Semaphore) *shardBuffer {
+func newShardBuffer(mode bufferMode, keyspace, shard string, bufferSizeSema *sync2.Semaphore) *shardBuffer {
 	statsKey := []string{keyspace, shard}
 	initVariablesForShard(statsKey)
 
@@ -128,7 +104,6 @@ func newShardBuffer(mode bufferMode, keyspace, shard string, now func() time.Tim
 		mode:           mode,
 		keyspace:       keyspace,
 		shard:          shard,
-		now:            now,
 		bufferSizeSema: bufferSizeSema,
 		statsKey:       statsKey,
 		statsKeyJoined: fmt.Sprintf("%s.%s", keyspace, shard),
@@ -167,39 +142,14 @@ func (sb *shardBuffer) waitForFailoverEnd(ctx context.Context, keyspace, shard s
 
 	// Start buffering if failover is not detected yet.
 	if sb.state == stateIdle {
-		// Do not buffer if last failover is too recent. This is the case if:
-		// a) buffering was stopped recently
-		// OR
-		// b) we did not buffer, but observed a reparent very recently
-		now := sb.now()
-
-		// a) Buffering was stopped recently.
-		// This can happen when we stop buffering while MySQL is not ready yet
-		// (read-only mode is not cleared yet on the new master).
-		lastBufferingStopped := now.Sub(sb.lastEnd)
-		if !sb.lastEnd.IsZero() && lastBufferingStopped < *minTimeBetweenFailovers {
-			sb.mu.Unlock()
-			msg := "NOT starting buffering"
-			if sb.mode == bufferDryRun {
-				msg = "Dry-run: Would NOT have started buffering"
-			}
-
-			sb.logTooRecent.Infof("%v for shard: %s because the last failover which triggered buffering is too recent (%v < %v)."+
-				" (A failover was detected by this seen error: %v.)",
-				msg, topoproto.KeyspaceShardString(keyspace, shard), lastBufferingStopped, *minTimeBetweenFailovers, err)
-
-			statsKeyWithReason := append(sb.statsKey, string(skippedLastFailoverTooRecent))
-			requestsSkipped.Add(statsKeyWithReason, 1)
-			return nil, nil
-		}
-
-		// b) The MASTER was reparented recently (but we did not buffer it.)
-		// This can happen when we see the end of the reparent *before* the first
-		// request failure caused by the reparent. This is possible if the QPS is
-		// very low. If we do not skip buffering here, we would start buffering but
-		// not stop because we already observed the promotion of the new master.
-		lastReparentAgo := now.Sub(sb.lastReparent)
-		if !sb.lastReparent.IsZero() && lastReparentAgo < *minTimeBetweenFailovers {
+		// Do not buffer if last failover is too recent.
+		now := time.Now()
+		// Checking the reparent time as well is important because we may observe
+		// the reparent (via the HealthCheck callback) *before* we see a failed
+		// request if the QPS is very low. In that case we would start buffering
+		// but not stop because we already observed the promotion of the new master.
+		lastReparent := now.Sub(time.Unix(sb.externallyReparented, 0 /* nsec */))
+		if sb.externallyReparentedAfterStart != sb.externallyReparented && lastReparent < *minTimeBetweenFailovers {
 			sb.mu.Unlock()
 			msg := "NOT starting buffering"
 			if sb.mode == bufferDryRun {
@@ -208,9 +158,27 @@ func (sb *shardBuffer) waitForFailoverEnd(ctx context.Context, keyspace, shard s
 
 			sb.logTooRecent.Infof("%v for shard: %s because the last reparent is too recent (%v < %v)."+
 				" (A failover was detected by this seen error: %v.)",
-				msg, topoproto.KeyspaceShardString(keyspace, shard), lastReparentAgo, *minTimeBetweenFailovers, err)
+				msg, topoproto.KeyspaceShardString(keyspace, shard), lastReparent, *minTimeBetweenFailovers, err)
 
 			statsKeyWithReason := append(sb.statsKey, string(skippedLastReparentTooRecent))
+			requestsSkipped.Add(statsKeyWithReason, 1)
+			return nil, nil
+		}
+		lastDetectedFailover := now.Sub(sb.lastEnd)
+		if !sb.lastEnd.IsZero() && lastDetectedFailover < *minTimeBetweenFailovers {
+			sb.mu.Unlock()
+			// This can happen when we stop buffering while MySQL is not ready yet
+			// (read-only mode is not cleared yet on the new master).
+			msg := "NOT starting buffering"
+			if sb.mode == bufferDryRun {
+				msg = "Dry-run: Would NOT have started buffering"
+			}
+
+			sb.logTooRecent.Infof("%v for shard: %s because the last detected failover is too recent (%v < %v)."+
+				" (A failover was detected by this seen error: %v.)",
+				msg, topoproto.KeyspaceShardString(keyspace, shard), lastDetectedFailover, *minTimeBetweenFailovers, err)
+
+			statsKeyWithReason := append(sb.statsKey, string(skippedLastFailoverTooRecent))
 			requestsSkipped.Add(statsKeyWithReason, 1)
 			return nil, nil
 		}
@@ -265,7 +233,7 @@ func (sb *shardBuffer) startBufferingLocked(err error) {
 	lastRequestsDryRunMax.Set(sb.statsKey, 0)
 	failoverDurationSumMs.Set(sb.statsKey, 0)
 
-	sb.lastStart = sb.now()
+	sb.lastStart = time.Now()
 	sb.logErrorIfStateNotLocked(stateIdle)
 	sb.state = stateBuffering
 	sb.queue = make([]*entry, 0)
@@ -325,7 +293,7 @@ func (sb *shardBuffer) bufferRequestLocked(ctx context.Context) (*entry, error) 
 
 	e := &entry{
 		done:     make(chan struct{}),
-		deadline: sb.now().Add(*window),
+		deadline: time.Now().Add(*window),
 	}
 	e.bufferCtx, e.bufferCancel = context.WithCancel(ctx)
 	sb.queue = append(sb.queue, e)
@@ -468,7 +436,7 @@ func (sb *shardBuffer) remove(toRemove *entry) {
 	// Entry was already removed. Keep the queue as it is.
 }
 
-func (sb *shardBuffer) recordExternallyReparentedTimestamp(timestamp int64, alias *topodatapb.TabletAlias) {
+func (sb *shardBuffer) recordExternallyReparentedTimestamp(timestamp int64) {
 	// Fast path (read lock): Check if new timestamp is higher.
 	sb.mu.RLock()
 	if timestamp <= sb.externallyReparented {
@@ -490,11 +458,9 @@ func (sb *shardBuffer) recordExternallyReparentedTimestamp(timestamp int64, alia
 	}
 
 	sb.externallyReparented = timestamp
-	if !topoproto.TabletAliasEqual(alias, sb.currentMaster) {
-		if sb.currentMaster != nil {
-			sb.lastReparent = sb.now()
-		}
-		sb.currentMaster = alias
+	if sb.externallyReparentedAfterStart == 0 {
+		// First non-zero value after startup. Remember it.
+		sb.externallyReparentedAfterStart = timestamp
 	}
 	sb.stopBufferingLocked(stopFailoverEndDetected, "failover end detected")
 }
@@ -513,8 +479,8 @@ func (sb *shardBuffer) stopBufferingLocked(reason stopReason, details string) {
 	}
 
 	// Stop buffering.
-	sb.lastEnd = sb.now()
-	d := sb.lastEnd.Sub(sb.lastStart)
+	sb.lastEnd = time.Now()
+	d := time.Since(sb.lastStart)
 
 	statsKeyWithReason := append(sb.statsKey, string(reason))
 	stops.Add(statsKeyWithReason, 1)
@@ -556,12 +522,12 @@ func (sb *shardBuffer) drain(q []*entry) {
 	// shardBuffer as well e.g. to get the current oldest entry.
 	sb.timeoutThread.stop()
 
-	start := sb.now()
+	start := time.Now()
 	// TODO(mberlin): Parallelize the drain by pumping the data through a channel.
 	for _, e := range q {
 		sb.unblockAndWait(e, nil /* err */, true /* releaseSlot */, true /* blockingWait */)
 	}
-	d := sb.now().Sub(start)
+	d := time.Since(start)
 	log.Infof("Draining finished for shard: %s Took: %v for: %d requests.", topoproto.KeyspaceShardString(sb.keyspace, sb.shard), d, len(q))
 	requestsDrained.Add(sb.statsKey, int64(len(q)))
 

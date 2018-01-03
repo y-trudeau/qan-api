@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package gateway
 
 import (
@@ -25,8 +9,8 @@ import (
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/discovery"
 	"github.com/youtube/vitess/go/vt/topo"
-	"github.com/youtube/vitess/go/vt/topotools"
 	"github.com/youtube/vitess/go/vt/vterrors"
+	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/querytypes"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
@@ -46,12 +30,12 @@ func TestDiscoveryGatewayExecute(t *testing.T) {
 
 func TestDiscoveryGatewayExecuteBatch(t *testing.T) {
 	testDiscoveryGatewayGeneric(t, false, func(dg Gateway, target *querypb.Target) error {
-		queries := []*querypb.BoundQuery{{Sql: "query", BindVariables: nil}}
+		queries := []querytypes.BoundQuery{{Sql: "query", BindVariables: nil}}
 		_, err := dg.ExecuteBatch(context.Background(), target, queries, false, 0, nil)
 		return err
 	})
 	testDiscoveryGatewayTransact(t, false, func(dg Gateway, target *querypb.Target) error {
-		queries := []*querypb.BoundQuery{{Sql: "query", BindVariables: nil}}
+		queries := []querytypes.BoundQuery{{Sql: "query", BindVariables: nil}}
 		_, err := dg.ExecuteBatch(context.Background(), target, queries, false, 1, nil)
 		return err
 	})
@@ -68,7 +52,7 @@ func TestDiscoveryGatewayExecuteStream(t *testing.T) {
 
 func TestDiscoveryGatewayBegin(t *testing.T) {
 	testDiscoveryGatewayGeneric(t, false, func(dg Gateway, target *querypb.Target) error {
-		_, err := dg.Begin(context.Background(), target, nil)
+		_, err := dg.Begin(context.Background(), target)
 		return err
 	})
 }
@@ -94,7 +78,7 @@ func TestDiscoveryGatewayBeginExecute(t *testing.T) {
 
 func TestDiscoveryGatewayBeginExecuteBatch(t *testing.T) {
 	testDiscoveryGatewayGeneric(t, false, func(dg Gateway, target *querypb.Target) error {
-		queries := []*querypb.BoundQuery{{Sql: "query", BindVariables: nil}}
+		queries := []querytypes.BoundQuery{{Sql: "query", BindVariables: nil}}
 		_, _, err := dg.BeginExecuteBatch(context.Background(), target, queries, false, nil)
 		return err
 	})
@@ -172,8 +156,8 @@ func testDiscoveryGatewayGeneric(t *testing.T, streaming bool, f func(dg Gateway
 	ep1 = sc1.Tablet()
 	ep2 := sc2.Tablet()
 	wants := map[string]int{
-		fmt.Sprintf(`target: ks.0.replica, used tablet: %s, FAILED_PRECONDITION error`, topotools.TabletIdent(ep1)): 0,
-		fmt.Sprintf(`target: ks.0.replica, used tablet: %s, FAILED_PRECONDITION error`, topotools.TabletIdent(ep2)): 0,
+		fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), FAILED_PRECONDITION error`, ep1): 0,
+		fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), FAILED_PRECONDITION error`, ep2): 0,
 	}
 	err = f(dg, target)
 	if _, ok := wants[fmt.Sprintf("%v", err)]; !ok {
@@ -190,8 +174,8 @@ func testDiscoveryGatewayGeneric(t *testing.T, streaming bool, f func(dg Gateway
 	ep1 = sc1.Tablet()
 	ep2 = sc2.Tablet()
 	wants = map[string]int{
-		fmt.Sprintf(`target: ks.0.replica, used tablet: %s, FAILED_PRECONDITION error`, topotools.TabletIdent(ep1)): 0,
-		fmt.Sprintf(`target: ks.0.replica, used tablet: %s, FAILED_PRECONDITION error`, topotools.TabletIdent(ep2)): 0,
+		fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), FAILED_PRECONDITION error`, ep1): 0,
+		fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), FAILED_PRECONDITION error`, ep2): 0,
 	}
 	err = f(dg, target)
 	if _, ok := wants[fmt.Sprintf("%v", err)]; !ok {
@@ -204,7 +188,7 @@ func testDiscoveryGatewayGeneric(t *testing.T, streaming bool, f func(dg Gateway
 	sc1 = hc.AddTestTablet("cell", "1.1.1.1", 1001, keyspace, shard, tabletType, true, 10, nil)
 	sc1.MustFailCodes[vtrpcpb.Code_INVALID_ARGUMENT] = 1
 	ep1 = sc1.Tablet()
-	want = fmt.Sprintf(`target: ks.0.replica, used tablet: %s, INVALID_ARGUMENT error`, topotools.TabletIdent(ep1))
+	want = fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), INVALID_ARGUMENT error`, ep1)
 	err = f(dg, target)
 	verifyShardError(t, err, want, vtrpcpb.Code_INVALID_ARGUMENT)
 
@@ -240,8 +224,8 @@ func testDiscoveryGatewayTransact(t *testing.T, streaming bool, f func(dg Gatewa
 	ep1 := sc1.Tablet()
 	ep2 := sc2.Tablet()
 	wants := map[string]int{
-		fmt.Sprintf(`target: ks.0.replica, used tablet: %s, FAILED_PRECONDITION error`, topotools.TabletIdent(ep1)): 0,
-		fmt.Sprintf(`target: ks.0.replica, used tablet: %s, FAILED_PRECONDITION error`, topotools.TabletIdent(ep2)): 0,
+		fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), FAILED_PRECONDITION error`, ep1): 0,
+		fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), FAILED_PRECONDITION error`, ep2): 0,
 	}
 	err := f(dg, target)
 	if _, ok := wants[fmt.Sprintf("%v", err)]; !ok {
@@ -254,7 +238,7 @@ func testDiscoveryGatewayTransact(t *testing.T, streaming bool, f func(dg Gatewa
 	sc1 = hc.AddTestTablet("cell", "1.1.1.1", 1001, keyspace, shard, tabletType, true, 10, nil)
 	sc1.MustFailCodes[vtrpcpb.Code_INVALID_ARGUMENT] = 1
 	ep1 = sc1.Tablet()
-	want := fmt.Sprintf(`target: ks.0.replica, used tablet: %s, INVALID_ARGUMENT error`, topotools.TabletIdent(ep1))
+	want := fmt.Sprintf(`target: ks.0.replica, used tablet: (%+v), INVALID_ARGUMENT error`, ep1)
 	err = f(dg, target)
 	verifyShardError(t, err, want, vtrpcpb.Code_INVALID_ARGUMENT)
 }

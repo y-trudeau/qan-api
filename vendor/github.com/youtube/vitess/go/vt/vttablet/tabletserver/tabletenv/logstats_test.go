@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletenv
 
@@ -28,7 +16,6 @@ import (
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/callinfo"
 	"github.com/youtube/vitess/go/vt/callinfo/fakecallinfo"
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
 )
 
 func TestLogStats(t *testing.T) {
@@ -43,7 +30,7 @@ func TestLogStats(t *testing.T) {
 		t.Fatalf("there is no rows in log stats, estimated size should be 0 bytes")
 	}
 
-	logStats.Rows = [][]sqltypes.Value{{sqltypes.NewVarBinary("a")}}
+	logStats.Rows = [][]sqltypes.Value{{sqltypes.MakeString([]byte("a"))}}
 	if logStats.SizeOfResponse() <= 0 {
 		t.Fatalf("log stats has some rows, should have positive response size")
 	}
@@ -55,10 +42,9 @@ func TestLogStats(t *testing.T) {
 
 func TestLogStatsFormatBindVariables(t *testing.T) {
 	logStats := NewLogStats(context.Background(), "test")
-	logStats.BindVariables = map[string]*querypb.BindVariable{
-		"key_1": sqltypes.StringBindVariable("val_1"),
-		"key_2": sqltypes.Int64BindVariable(789),
-	}
+	logStats.BindVariables = make(map[string]interface{})
+	logStats.BindVariables["key_1"] = "val_1"
+	logStats.BindVariables["key_2"] = 789
 
 	formattedStr := logStats.FmtBindVariables(true)
 	if !strings.Contains(formattedStr, "key_1") ||
@@ -70,7 +56,7 @@ func TestLogStatsFormatBindVariables(t *testing.T) {
 		t.Fatalf("bind variable 'key_2': '789' is not formatted")
 	}
 
-	logStats.BindVariables["key_3"] = sqltypes.BytesBindVariable([]byte("val_3"))
+	logStats.BindVariables["key_3"] = []byte("val_3")
 	formattedStr = logStats.FmtBindVariables(false)
 	if !strings.Contains(formattedStr, "key_1") {
 		t.Fatalf("bind variable 'key_1' is not formatted")

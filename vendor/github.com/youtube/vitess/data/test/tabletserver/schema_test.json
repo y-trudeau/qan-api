@@ -26,7 +26,6 @@
     "Indexes": [
       {
         "Name": "PRIMARY",
-        "Unique": true,
         "Columns": [
           "eid",
           "id"
@@ -44,7 +43,6 @@
       },
       {
         "Name": "a_name",
-        "Unique": true,
         "Columns": [
           "eid",
           "name"
@@ -109,7 +107,66 @@
     "Indexes": [
       {
         "Name": "PRIMARY",
-        "Unique": true,
+        "Columns": [
+          "eid",
+          "id"
+        ],
+        "Cardinality": [
+          1,
+          1
+        ],
+        "DataColumns": [
+          "eid",
+          "id",
+          "name",
+          "foo"
+        ]
+      },
+      {
+        "Name": "a_name",
+        "Columns": [
+          "eid",
+          "name"
+        ],
+        "Cardinality": [
+          1,
+          1
+        ],
+        "DataColumns": [
+          "eid",
+          "name",
+          "id"
+        ]
+      },
+      {
+        "Name": "b_name",
+        "Columns": [
+          "name"
+        ],
+        "Cardinality": [
+          3
+        ],
+        "DataColumns": [
+          "name",
+          "eid",
+          "id"
+        ]
+      },
+      {
+        "Name": "c_name",
+        "Columns": [
+          "name"
+        ],
+        "Cardinality": [
+          2
+        ],
+        "DataColumns": [
+          "eid",
+          "id"
+        ]
+      },
+      {
+        "Name": "PRIMARY",
         "Columns": [
           "eid",
           "id"
@@ -169,7 +226,6 @@
     "Indexes": [
       {
         "Name": "PRIMARY",
-        "Unique": true,
         "Columns": [
           "name"
         ],
@@ -231,7 +287,6 @@
     "Indexes": [
       {
         "Name": "PRIMARY",
-        "Unique": true,
         "Columns": [
           "id"
         ],
@@ -246,68 +301,6 @@
       0
     ],
     "Type": 1
-  },
-  {
-    "Name": "auto",
-    "Columns": [
-      {
-        "Name": "id",
-        "IsAuto": true
-      }
-    ],
-    "Indexes": [
-      {
-        "Name": "PRIMARY",
-        "Unique": true,
-        "Columns": [
-          "id"
-        ],
-        "Cardinality": [
-          1
-        ],
-        "DataColumns": [
-        ]
-      }
-    ],
-    "PKColumns": [
-      0
-    ],
-    "Type": 0
-  },
-  {
-    "Name": "with_defaults",
-    "Columns": [
-      {
-        "Name": "aid",
-        "Default": 3
-      },
-      {
-        "Name": "bid",
-        "Default": -2
-      },
-      {
-        "Name": "cid",
-        "Default": null
-      }
-    ],
-    "Indexes": [
-      {
-        "Name": "PRIMARY",
-        "Unique": true,
-        "Columns": [
-          "id"
-        ],
-        "Cardinality": [
-          1
-        ],
-        "DataColumns": [
-        ]
-      }
-    ],
-    "PKColumns": [
-      0
-    ],
-    "Type": 0
   },
   {
     "Name": "msg",
@@ -337,7 +330,6 @@
     "Indexes": [
       {
         "Name": "PRIMARY",
-        "Unique": true,
         "Columns": [
           "time_scheduled",
           "id"

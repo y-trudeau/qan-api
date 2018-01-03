@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package schema
 
@@ -28,8 +16,8 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/youtube/vitess/go/mysql"
-	"github.com/youtube/vitess/go/mysql/fakesqldb"
+	"github.com/youtube/vitess/go/mysqlconn"
+	"github.com/youtube/vitess/go/mysqlconn/fakesqldb"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema/schematest"
@@ -47,8 +35,8 @@ func TestOpenFailedDueToMissMySQLTime(t *testing.T) {
 			{Type: sqltypes.Uint64},
 		},
 		Rows: [][]sqltypes.Value{
-			{sqltypes.NewVarBinary("1427325875")},
-			{sqltypes.NewVarBinary("1427325875")},
+			{sqltypes.MakeString([]byte("1427325875"))},
+			{sqltypes.MakeString([]byte("1427325875"))},
 		},
 	})
 	se := newEngine(10, 1*time.Second, 1*time.Second, false)
@@ -88,7 +76,7 @@ func TestOpenFailedDueToInvalidTimeFormat(t *testing.T) {
 		}},
 		Rows: [][]sqltypes.Value{
 			// make safety check fail, invalid time format
-			{sqltypes.NewVarBinary("invalid_time")},
+			{sqltypes.MakeString([]byte("invalid_time"))},
 		},
 	})
 	se := newEngine(10, 1*time.Second, 1*time.Second, false)
@@ -105,7 +93,7 @@ func TestOpenFailedDueToExecErr(t *testing.T) {
 	for query, result := range schematest.Queries() {
 		db.AddQuery(query, result)
 	}
-	db.AddRejectedQuery(mysql.BaseShowTables, fmt.Errorf("injected error"))
+	db.AddRejectedQuery(mysqlconn.BaseShowTables, fmt.Errorf("injected error"))
 	se := newEngine(10, 1*time.Second, 1*time.Second, false)
 	err := se.Open(db.ConnParams())
 	want := "could not get table list"
@@ -120,11 +108,11 @@ func TestOpenFailedDueToTableErr(t *testing.T) {
 	for query, result := range schematest.Queries() {
 		db.AddQuery(query, result)
 	}
-	db.AddQuery(mysql.BaseShowTables, &sqltypes.Result{
-		Fields:       mysql.BaseShowTablesFields,
+	db.AddQuery(mysqlconn.BaseShowTables, &sqltypes.Result{
+		Fields:       mysqlconn.BaseShowTablesFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.BaseShowTablesRow("test_table", false, ""),
+			mysqlconn.BaseShowTablesRow("test_table", false, ""),
 		},
 	})
 	db.AddQuery("select * from test_table where 1 != 1", &sqltypes.Result{
@@ -135,7 +123,7 @@ func TestOpenFailedDueToTableErr(t *testing.T) {
 			},
 		},
 		Rows: [][]sqltypes.Value{
-			{sqltypes.NewVarBinary("")},
+			{sqltypes.MakeString([]byte(""))},
 		},
 	})
 	se := newEngine(10, 1*time.Second, 1*time.Second, false)
@@ -168,15 +156,15 @@ func TestReload(t *testing.T) {
 	if table != nil {
 		t.Fatalf("table: %s exists; expecting nil", newTable)
 	}
-	db.AddQuery(mysql.BaseShowTables, &sqltypes.Result{
+	db.AddQuery(mysqlconn.BaseShowTables, &sqltypes.Result{
 		// make this query return nothing during reload
-		Fields: mysql.BaseShowTablesFields,
+		Fields: mysqlconn.BaseShowTablesFields,
 	})
-	db.AddQuery(mysql.BaseShowTablesForTable(newTable.String()), &sqltypes.Result{
-		Fields:       mysql.BaseShowTablesFields,
+	db.AddQuery(mysqlconn.BaseShowTablesForTable(newTable.String()), &sqltypes.Result{
+		Fields:       mysqlconn.BaseShowTablesFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.BaseShowTablesRow(newTable.String(), false, ""),
+			mysqlconn.BaseShowTablesRow(newTable.String(), false, ""),
 		},
 	})
 
@@ -187,17 +175,17 @@ func TestReload(t *testing.T) {
 		}},
 	})
 	db.AddQuery("describe test_table_04", &sqltypes.Result{
-		Fields:       mysql.DescribeTableFields,
+		Fields:       mysqlconn.DescribeTableFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.DescribeTableRow("pk", "int(11)", false, "PRI", "0"),
+			mysqlconn.DescribeTableRow("pk", "int(11)", false, "PRI", "0"),
 		},
 	})
 	db.AddQuery("show index from test_table_04", &sqltypes.Result{
-		Fields:       mysql.ShowIndexFromTableFields,
+		Fields:       mysqlconn.ShowIndexFromTableFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.ShowIndexFromTableRow("test_table_04", true, "PRIMARY", 1, "pk", false),
+			mysqlconn.ShowIndexFromTableRow("test_table_04", true, "PRIMARY", 1, "pk", false),
 		},
 	})
 
@@ -208,11 +196,11 @@ func TestReload(t *testing.T) {
 	}
 
 	// test reload with new table: test_table_04
-	db.AddQuery(mysql.BaseShowTables, &sqltypes.Result{
-		Fields:       mysql.BaseShowTablesFields,
+	db.AddQuery(mysqlconn.BaseShowTables, &sqltypes.Result{
+		Fields:       mysqlconn.BaseShowTablesFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.BaseShowTablesRow(newTable.String(), false, ""),
+			mysqlconn.BaseShowTablesRow(newTable.String(), false, ""),
 		},
 	})
 	table = se.GetTable(newTable)
@@ -234,7 +222,7 @@ func TestCreateOrUpdateTableFailedDuetoExecErr(t *testing.T) {
 	for query, result := range schematest.Queries() {
 		db.AddQuery(query, result)
 	}
-	db.AddRejectedQuery(mysql.BaseShowTablesForTable("test_table"), fmt.Errorf("forced fail"))
+	db.AddRejectedQuery(mysqlconn.BaseShowTablesForTable("test_table"), fmt.Errorf("forced fail"))
 	se := newEngine(10, 1*time.Second, 1*time.Second, false)
 	se.Open(db.ConnParams())
 	defer se.Close()
@@ -259,19 +247,19 @@ func TestCreateOrUpdateTable(t *testing.T) {
 	se.Open(db.ConnParams())
 	defer se.Close()
 	existingTable := "test_table_01"
-	db.AddQuery(mysql.BaseShowTablesForTable(existingTable), &sqltypes.Result{
-		Fields:       mysql.BaseShowTablesFields,
+	db.AddQuery(mysqlconn.BaseShowTablesForTable(existingTable), &sqltypes.Result{
+		Fields:       mysqlconn.BaseShowTablesFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.BaseShowTablesRow(existingTable, false, ""),
+			mysqlconn.BaseShowTablesRow(existingTable, false, ""),
 		},
 	})
 	i := 0
 	se.RegisterNotifier("test", func(schema map[string]*Table, created, altered, dropped []string) {
 		switch i {
 		case 0:
-			if len(created) != 5 {
-				t.Errorf("callback 0: %v, want len of 5\n", created)
+			if len(created) != 4 {
+				t.Errorf("callback 0: %v, want len of 4\n", created)
 			}
 		case 1:
 			want := []string{"test_table_01"}
@@ -319,19 +307,19 @@ func TestUpdatedMysqlStats(t *testing.T) {
 	defer se.Close()
 	// Add new table
 	tableName := sqlparser.NewTableIdent("mysql_stats_test_table")
-	db.AddQuery(mysql.BaseShowTables, &sqltypes.Result{
-		Fields:       mysql.BaseShowTablesFields,
+	db.AddQuery(mysqlconn.BaseShowTables, &sqltypes.Result{
+		Fields:       mysqlconn.BaseShowTablesFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.BaseShowTablesRow(tableName.String(), false, ""),
+			mysqlconn.BaseShowTablesRow(tableName.String(), false, ""),
 		},
 	})
 	// Add queries necessary for TableWasCreatedOrAltered() and NewTable()
-	db.AddQuery(mysql.BaseShowTablesForTable(tableName.String()), &sqltypes.Result{
-		Fields:       mysql.BaseShowTablesFields,
+	db.AddQuery(mysqlconn.BaseShowTablesForTable(tableName.String()), &sqltypes.Result{
+		Fields:       mysqlconn.BaseShowTablesFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.BaseShowTablesRow(tableName.String(), false, ""),
+			mysqlconn.BaseShowTablesRow(tableName.String(), false, ""),
 		},
 	})
 	q := fmt.Sprintf("select * from %s where 1 != 1", tableName)
@@ -343,18 +331,18 @@ func TestUpdatedMysqlStats(t *testing.T) {
 	})
 	q = fmt.Sprintf("describe %s", tableName)
 	db.AddQuery(q, &sqltypes.Result{
-		Fields:       mysql.DescribeTableFields,
+		Fields:       mysqlconn.DescribeTableFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.DescribeTableRow("pk", "int(11)", false, "PRI", "0"),
+			mysqlconn.DescribeTableRow("pk", "int(11)", false, "PRI", "0"),
 		},
 	})
 	q = fmt.Sprintf("show index from %s", tableName)
 	db.AddQuery(q, &sqltypes.Result{
-		Fields:       mysql.ShowIndexFromTableFields,
+		Fields:       mysqlconn.ShowIndexFromTableFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
-			mysql.ShowIndexFromTableRow(tableName.String(), true, "PRIMARY", 1, "pk", false),
+			mysqlconn.ShowIndexFromTableRow(tableName.String(), true, "PRIMARY", 1, "pk", false),
 		},
 	})
 
@@ -371,15 +359,15 @@ func TestUpdatedMysqlStats(t *testing.T) {
 	df1 := table.DataFree
 	mdl1 := table.MaxDataLength
 	// Update existing table with new stats.
-	row := mysql.BaseShowTablesRow(tableName.String(), false, "")
-	row[2] = sqltypes.NewUint64(0) // smaller timestamp
-	row[4] = sqltypes.NewUint64(2) // table_rows
-	row[5] = sqltypes.NewUint64(3) // data_length
-	row[6] = sqltypes.NewUint64(4) // index_length
-	row[7] = sqltypes.NewUint64(5) // data_free
-	row[8] = sqltypes.NewUint64(6) // max_data_length
-	db.AddQuery(mysql.BaseShowTables, &sqltypes.Result{
-		Fields:       mysql.BaseShowTablesFields,
+	row := mysqlconn.BaseShowTablesRow(tableName.String(), false, "")
+	row[2] = sqltypes.MakeTrusted(sqltypes.Uint64, []byte("0")) // smaller timestamp
+	row[4] = sqltypes.MakeTrusted(sqltypes.Uint64, []byte("2")) // table_rows
+	row[5] = sqltypes.MakeTrusted(sqltypes.Uint64, []byte("3")) // data_length
+	row[6] = sqltypes.MakeTrusted(sqltypes.Uint64, []byte("4")) // index_length
+	row[7] = sqltypes.MakeTrusted(sqltypes.Uint64, []byte("5")) // data_free
+	row[8] = sqltypes.MakeTrusted(sqltypes.Uint64, []byte("6")) // max_data_length
+	db.AddQuery(mysqlconn.BaseShowTables, &sqltypes.Result{
+		Fields:       mysqlconn.BaseShowTablesFields,
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
 			row,
@@ -427,5 +415,6 @@ func newEngine(queryCacheSize int, reloadTime time.Duration, idleTimeout time.Du
 	config.QueryCacheSize = queryCacheSize
 	config.SchemaReloadTime = float64(reloadTime) / 1e9
 	config.IdleTimeout = float64(idleTimeout) / 1e9
+	config.StrictMode = strict
 	return NewEngine(DummyChecker, config)
 }

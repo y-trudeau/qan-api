@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package sqlparser
 
@@ -21,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/youtube/vitess/go/bytes2"
 	"github.com/youtube/vitess/go/sqltypes"
 )
 
@@ -39,7 +26,6 @@ type Tokenizer struct {
 	LastError     string
 	posVarIndex   int
 	ParseTree     Statement
-	partialDDL    *DDL
 	nesting       int
 }
 
@@ -70,14 +56,11 @@ var keywords = map[string]int{
 	"as":                  AS,
 	"asc":                 ASC,
 	"asensitive":          UNUSED,
-	"auto_increment":      AUTO_INCREMENT,
 	"before":              UNUSED,
 	"between":             BETWEEN,
-	"bigint":              BIGINT,
+	"bigint":              UNUSED,
 	"binary":              BINARY,
-	"bit":                 BIT,
-	"blob":                BLOB,
-	"bool":                BOOL,
+	"blob":                UNUSED,
 	"boolean":             BOOLEAN,
 	"both":                UNUSED,
 	"by":                  BY,
@@ -86,13 +69,10 @@ var keywords = map[string]int{
 	"case":                CASE,
 	"cast":                CAST,
 	"change":              UNUSED,
-	"char":                CHAR,
 	"character":           CHARACTER,
-	"charset":             CHARSET,
 	"check":               UNUSED,
 	"collate":             COLLATE,
 	"column":              UNUSED,
-	"comment":             COMMENT_KEYWORD,
 	"condition":           UNUSED,
 	"constraint":          UNUSED,
 	"continue":            UNUSED,
@@ -111,9 +91,7 @@ var keywords = map[string]int{
 	"day_minute":          UNUSED,
 	"day_second":          UNUSED,
 	"date":                DATE,
-	"datetime":            DATETIME,
 	"dec":                 UNUSED,
-	"decimal":             DECIMAL,
 	"declare":             UNUSED,
 	"default":             DEFAULT,
 	"delayed":             UNUSED,
@@ -124,7 +102,7 @@ var keywords = map[string]int{
 	"distinct":            DISTINCT,
 	"distinctrow":         UNUSED,
 	"div":                 DIV,
-	"double":              DOUBLE,
+	"double":              UNUSED,
 	"drop":                DROP,
 	"duplicate":           DUPLICATE,
 	"each":                UNUSED,
@@ -132,7 +110,6 @@ var keywords = map[string]int{
 	"elseif":              UNUSED,
 	"enclosed":            UNUSED,
 	"end":                 END,
-	"enum":                ENUM,
 	"escape":              ESCAPE,
 	"escaped":             UNUSED,
 	"exists":              EXISTS,
@@ -141,7 +118,7 @@ var keywords = map[string]int{
 	"expansion":           EXPANSION,
 	"false":               FALSE,
 	"fetch":               UNUSED,
-	"float":               FLOAT_TYPE,
+	"float":               UNUSED,
 	"float4":              UNUSED,
 	"float8":              UNUSED,
 	"for":                 FOR,
@@ -168,7 +145,7 @@ var keywords = map[string]int{
 	"inner":               INNER,
 	"insensitive":         UNUSED,
 	"insert":              INSERT,
-	"int":                 INT,
+	"int":                 UNUSED,
 	"int1":                UNUSED,
 	"int2":                UNUSED,
 	"int3":                UNUSED,
@@ -181,7 +158,6 @@ var keywords = map[string]int{
 	"is":                  IS,
 	"iterate":             UNUSED,
 	"join":                JOIN,
-	"json":                JSON,
 	"key":                 KEY,
 	"keys":                UNUSED,
 	"kill":                UNUSED,
@@ -190,7 +166,6 @@ var keywords = map[string]int{
 	"leading":             UNUSED,
 	"leave":               UNUSED,
 	"left":                LEFT,
-	"less":                LESS,
 	"like":                LIKE,
 	"limit":               LIMIT,
 	"linear":              UNUSED,
@@ -200,30 +175,28 @@ var keywords = map[string]int{
 	"localtimestamp":      LOCALTIMESTAMP,
 	"lock":                LOCK,
 	"long":                UNUSED,
-	"longblob":            LONGBLOB,
-	"longtext":            LONGTEXT,
+	"longblob":            UNUSED,
+	"longtext":            UNUSED,
 	"loop":                UNUSED,
 	"low_priority":        UNUSED,
 	"master_bind":         UNUSED,
 	"match":               MATCH,
-	"maxvalue":            MAXVALUE,
-	"mediumblob":          MEDIUMBLOB,
-	"mediumint":           MEDIUMINT,
-	"mediumtext":          MEDIUMTEXT,
+	"maxvalue":            UNUSED,
+	"mediumblob":          UNUSED,
+	"mediumint":           UNUSED,
+	"mediumtext":          UNUSED,
 	"middleint":           UNUSED,
 	"minute_microsecond":  UNUSED,
 	"minute_second":       UNUSED,
 	"mod":                 MOD,
 	"mode":                MODE,
 	"modifies":            UNUSED,
-	"names":               NAMES,
 	"natural":             NATURAL,
-	"nchar":               NCHAR,
 	"next":                NEXT,
 	"not":                 NOT,
 	"no_write_to_binlog":  UNUSED,
 	"null":                NULL,
-	"numeric":             NUMERIC,
+	"numeric":             UNUSED,
 	"offset":              OFFSET,
 	"on":                  ON,
 	"optimize":            OPTIMIZE,
@@ -235,21 +208,20 @@ var keywords = map[string]int{
 	"out":                 UNUSED,
 	"outer":               OUTER,
 	"outfile":             UNUSED,
-	"partition":           PARTITION,
+	"partition":           UNUSED,
 	"precision":           UNUSED,
-	"primary":             PRIMARY,
+	"primary":             UNUSED,
 	"procedure":           UNUSED,
 	"query":               QUERY,
 	"range":               UNUSED,
 	"read":                UNUSED,
 	"reads":               UNUSED,
 	"read_write":          UNUSED,
-	"real":                REAL,
+	"real":                UNUSED,
 	"references":          UNUSED,
 	"regexp":              REGEXP,
 	"release":             UNUSED,
 	"rename":              RENAME,
-	"reorganize":          REORGANIZE,
 	"repair":              REPAIR,
 	"repeat":              UNUSED,
 	"replace":             REPLACE,
@@ -270,8 +242,7 @@ var keywords = map[string]int{
 	"share":               SHARE,
 	"show":                SHOW,
 	"signal":              UNUSED,
-	"signed":              SIGNED,
-	"smallint":            SMALLINT,
+	"smallint":            UNUSED,
 	"spatial":             UNUSED,
 	"specific":            UNUSED,
 	"sql":                 UNUSED,
@@ -290,14 +261,10 @@ var keywords = map[string]int{
 	"table":               TABLE,
 	"tables":              TABLES,
 	"terminated":          UNUSED,
-	"text":                TEXT,
-	"than":                THAN,
 	"then":                THEN,
-	"time":                TIME,
-	"timestamp":           TIMESTAMP,
-	"tinyblob":            TINYBLOB,
-	"tinyint":             TINYINT,
-	"tinytext":            TINYTEXT,
+	"tinyblob":            UNUSED,
+	"tinyint":             UNUSED,
+	"tinytext":            UNUSED,
 	"to":                  TO,
 	"trailing":            UNUSED,
 	"trigger":             UNUSED,
@@ -307,7 +274,6 @@ var keywords = map[string]int{
 	"union":               UNION,
 	"unique":              UNIQUE,
 	"unlock":              UNUSED,
-	"unsigned":            UNSIGNED,
 	"update":              UPDATE,
 	"usage":               UNUSED,
 	"use":                 USE,
@@ -316,8 +282,8 @@ var keywords = map[string]int{
 	"utc_time":            UTC_TIME,
 	"utc_timestamp":       UTC_TIMESTAMP,
 	"values":              VALUES,
-	"varbinary":           VARBINARY,
-	"varchar":             VARCHAR,
+	"varbinary":           UNUSED,
+	"varchar":             UNUSED,
 	"varcharacter":        UNUSED,
 	"varying":             UNUSED,
 	"virtual":             UNUSED,
@@ -331,21 +297,8 @@ var keywords = map[string]int{
 	"with":                WITH,
 	"write":               UNUSED,
 	"xor":                 UNUSED,
-	"year":                YEAR,
 	"year_month":          UNUSED,
-	"zerofill":            ZEROFILL,
-}
-
-// keywordStrings contains the reverse mapping of token to keyword strings
-var keywordStrings = map[int]string{}
-
-func init() {
-	for str, id := range keywords {
-		if id == UNUSED {
-			continue
-		}
-		keywordStrings[id] = str
-	}
+	"zerofill":            UNUSED,
 }
 
 // Lex returns the next token form the Tokenizer.
@@ -365,7 +318,7 @@ func (tkn *Tokenizer) Lex(lval *yySymType) int {
 
 // Error is called by go yacc if there's a parsing error.
 func (tkn *Tokenizer) Error(err string) {
-	buf := &bytes2.Buffer{}
+	buf := &bytes.Buffer{}
 	if tkn.lastToken != nil {
 		fmt.Fprintf(buf, "%s at position %v near '%s'", err, tkn.Position, tkn.lastToken)
 	} else {
@@ -394,12 +347,6 @@ func (tkn *Tokenizer) Scan() (int, []byte) {
 				return tkn.scanHex()
 			}
 		}
-		if ch == 'B' || ch == 'b' {
-			if tkn.lastChar == '\'' {
-				tkn.next()
-				return tkn.scanBitLiteral()
-			}
-		}
 		return tkn.scanIdentifier(byte(ch))
 	case isDigit(ch):
 		return tkn.scanNumber(false)
@@ -426,7 +373,7 @@ func (tkn *Tokenizer) Scan() (int, []byte) {
 			return int(ch), nil
 		case '?':
 			tkn.posVarIndex++
-			buf := new(bytes2.Buffer)
+			buf := new(bytes.Buffer)
 			fmt.Fprintf(buf, ":v%d", tkn.posVarIndex)
 			return VALUE_ARG, buf.Bytes()
 		case '.':
@@ -518,7 +465,7 @@ func (tkn *Tokenizer) skipBlank() {
 }
 
 func (tkn *Tokenizer) scanIdentifier(firstByte byte) (int, []byte) {
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	buffer.WriteByte(firstByte)
 	for isLetter(tkn.lastChar) || isDigit(tkn.lastChar) {
 		buffer.WriteByte(byte(tkn.lastChar))
@@ -537,7 +484,7 @@ func (tkn *Tokenizer) scanIdentifier(firstByte byte) (int, []byte) {
 }
 
 func (tkn *Tokenizer) scanHex() (int, []byte) {
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	tkn.scanMantissa(16, buffer)
 	if tkn.lastChar != '\'' {
 		return LEX_ERROR, buffer.Bytes()
@@ -549,18 +496,8 @@ func (tkn *Tokenizer) scanHex() (int, []byte) {
 	return HEX, buffer.Bytes()
 }
 
-func (tkn *Tokenizer) scanBitLiteral() (int, []byte) {
-	buffer := &bytes2.Buffer{}
-	tkn.scanMantissa(2, buffer)
-	if tkn.lastChar != '\'' {
-		return LEX_ERROR, buffer.Bytes()
-	}
-	tkn.next()
-	return BIT_LITERAL, buffer.Bytes()
-}
-
 func (tkn *Tokenizer) scanLiteralIdentifier() (int, []byte) {
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	backTickSeen := false
 	for {
 		if backTickSeen {
@@ -591,7 +528,7 @@ func (tkn *Tokenizer) scanLiteralIdentifier() (int, []byte) {
 }
 
 func (tkn *Tokenizer) scanBindVar() (int, []byte) {
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	buffer.WriteByte(byte(tkn.lastChar))
 	token := VALUE_ARG
 	tkn.next()
@@ -610,7 +547,7 @@ func (tkn *Tokenizer) scanBindVar() (int, []byte) {
 	return token, buffer.Bytes()
 }
 
-func (tkn *Tokenizer) scanMantissa(base int, buffer *bytes2.Buffer) {
+func (tkn *Tokenizer) scanMantissa(base int, buffer *bytes.Buffer) {
 	for digitVal(tkn.lastChar) < base {
 		tkn.consumeNext(buffer)
 	}
@@ -618,7 +555,7 @@ func (tkn *Tokenizer) scanMantissa(base int, buffer *bytes2.Buffer) {
 
 func (tkn *Tokenizer) scanNumber(seenDecimalPoint bool) (int, []byte) {
 	token := INTEGRAL
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	if seenDecimalPoint {
 		token = FLOAT
 		buffer.WriteByte('.')
@@ -665,7 +602,7 @@ exit:
 }
 
 func (tkn *Tokenizer) scanString(delim uint16, typ int) (int, []byte) {
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	for {
 		ch := tkn.lastChar
 		tkn.next()
@@ -695,7 +632,7 @@ func (tkn *Tokenizer) scanString(delim uint16, typ int) (int, []byte) {
 }
 
 func (tkn *Tokenizer) scanCommentType1(prefix string) (int, []byte) {
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	buffer.WriteString(prefix)
 	for tkn.lastChar != eofChar {
 		if tkn.lastChar == '\n' {
@@ -708,7 +645,7 @@ func (tkn *Tokenizer) scanCommentType1(prefix string) (int, []byte) {
 }
 
 func (tkn *Tokenizer) scanCommentType2() (int, []byte) {
-	buffer := &bytes2.Buffer{}
+	buffer := &bytes.Buffer{}
 	buffer.WriteString("/*")
 	for {
 		if tkn.lastChar == '*' {
@@ -727,7 +664,7 @@ func (tkn *Tokenizer) scanCommentType2() (int, []byte) {
 	return COMMENT, buffer.Bytes()
 }
 
-func (tkn *Tokenizer) consumeNext(buffer *bytes2.Buffer) {
+func (tkn *Tokenizer) consumeNext(buffer *bytes.Buffer) {
 	if tkn.lastChar == eofChar {
 		// This should never happen.
 		panic("unexpected EOF")

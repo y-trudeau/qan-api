@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package splitquery
 
 import (
@@ -24,16 +8,15 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/sqlparser"
+	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/querytypes"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/splitquery/splitquery_testing"
-
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
 )
 
 func TestMultipleBoundaries(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 	splitParams, err := NewSplitParamsGivenNumRowsPerQueryPart(
-		&querypb.BoundQuery{Sql: "select * from test_table where int_col > 5"},
+		querytypes.BoundQuery{Sql: "select * from test_table where int_col > 5"},
 		[]sqlparser.ColIdent{
 			sqlparser.NewColIdent("id"),
 			sqlparser.NewColIdent("user_id"),
@@ -49,11 +32,11 @@ func TestMultipleBoundaries(t *testing.T) {
 		"select id, user_id from test_table force index (`PRIMARY`)"+
 			" order by id asc, user_id asc"+
 			" limit 1000, 1",
-		map[string]*querypb.BindVariable{})
+		map[string]interface{}{})
 	expectedCall1.Return(
 		&sqltypes.Result{
 			Rows: [][]sqltypes.Value{
-				{sqltypes.NewInt64(1), sqltypes.NewInt64(1)}},
+				{int64Value(1), int64Value(1)}},
 		},
 		nil)
 	expectedCall2 := mockSQLExecuter.EXPECT().SQLExecute(
@@ -63,14 +46,14 @@ func TestMultipleBoundaries(t *testing.T) {
 			" (:_splitquery_prev_id = id and :_splitquery_prev_user_id <= user_id)"+
 			" order by id asc, user_id asc"+
 			" limit 1000, 1",
-		map[string]*querypb.BindVariable{
-			"_splitquery_prev_id":      sqltypes.Int64BindVariable(1),
-			"_splitquery_prev_user_id": sqltypes.Int64BindVariable(1),
+		map[string]interface{}{
+			"_splitquery_prev_id":      int64(1),
+			"_splitquery_prev_user_id": int64(1),
 		})
 	expectedCall2.Return(
 		&sqltypes.Result{
 			Rows: [][]sqltypes.Value{
-				{sqltypes.NewInt64(2), sqltypes.NewInt64(10)}},
+				{int64Value(2), int64Value(10)}},
 		},
 		nil)
 	expectedCall2.After(expectedCall1)
@@ -81,9 +64,9 @@ func TestMultipleBoundaries(t *testing.T) {
 			" (:_splitquery_prev_id = id and :_splitquery_prev_user_id <= user_id)"+
 			" order by id asc, user_id asc"+
 			" limit 1000, 1",
-		map[string]*querypb.BindVariable{
-			"_splitquery_prev_id":      sqltypes.Int64BindVariable(2),
-			"_splitquery_prev_user_id": sqltypes.Int64BindVariable(10),
+		map[string]interface{}{
+			"_splitquery_prev_id":      int64(2),
+			"_splitquery_prev_user_id": int64(10),
 		})
 	expectedCall3.Return(
 		&sqltypes.Result{Rows: [][]sqltypes.Value{}}, nil)
@@ -98,8 +81,8 @@ func TestMultipleBoundaries(t *testing.T) {
 		t.Fatalf("FullScanAlgorithm.generateBoundaries() failed with: %v", err)
 	}
 	expectedBoundaries := []tuple{
-		{sqltypes.NewInt64(1), sqltypes.NewInt64(1)},
-		{sqltypes.NewInt64(2), sqltypes.NewInt64(10)},
+		{int64Value(1), int64Value(1)},
+		{int64Value(2), int64Value(10)},
 	}
 	if !reflect.DeepEqual(expectedBoundaries, boundaries) {
 		t.Fatalf("expected: %v, got: %v", expectedBoundaries, boundaries)
@@ -110,7 +93,7 @@ func TestSmallNumberOfRows(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 	splitParams, err := NewSplitParamsGivenNumRowsPerQueryPart(
-		&querypb.BoundQuery{Sql: "select * from test_table where int_col > 5"},
+		querytypes.BoundQuery{Sql: "select * from test_table where int_col > 5"},
 		[]sqlparser.ColIdent{
 			sqlparser.NewColIdent("id"),
 			sqlparser.NewColIdent("user_id"),
@@ -126,7 +109,7 @@ func TestSmallNumberOfRows(t *testing.T) {
 		"select id, user_id from test_table force index (`PRIMARY`)"+
 			" order by id asc, user_id asc"+
 			" limit 1000, 1",
-		map[string]*querypb.BindVariable{})
+		map[string]interface{}{})
 	expectedCall1.Return(
 		&sqltypes.Result{Rows: [][]sqltypes.Value{}}, nil)
 
@@ -148,7 +131,7 @@ func TestSQLExecuterReturnsError(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 	splitParams, err := NewSplitParamsGivenNumRowsPerQueryPart(
-		&querypb.BoundQuery{Sql: "select * from test_table where int_col > 5"},
+		querytypes.BoundQuery{Sql: "select * from test_table where int_col > 5"},
 		[]sqlparser.ColIdent{
 			sqlparser.NewColIdent("id"),
 			sqlparser.NewColIdent("user_id"),
@@ -164,11 +147,11 @@ func TestSQLExecuterReturnsError(t *testing.T) {
 		"select id, user_id from test_table force index (`PRIMARY`)"+
 			" order by id asc, user_id asc"+
 			" limit 1000, 1",
-		map[string]*querypb.BindVariable{})
+		map[string]interface{}{})
 	expectedCall1.Return(
 		&sqltypes.Result{
 			Rows: [][]sqltypes.Value{
-				{sqltypes.NewInt64(1), sqltypes.NewInt64(1)}},
+				{int64Value(1), int64Value(1)}},
 		},
 		nil)
 	expectedCall2 := mockSQLExecuter.EXPECT().SQLExecute(
@@ -178,9 +161,9 @@ func TestSQLExecuterReturnsError(t *testing.T) {
 			" (:_splitquery_prev_id = id and :_splitquery_prev_user_id <= user_id)"+
 			" order by id asc, user_id asc"+
 			" limit 1000, 1",
-		map[string]*querypb.BindVariable{
-			"_splitquery_prev_id":      sqltypes.Int64BindVariable(1),
-			"_splitquery_prev_user_id": sqltypes.Int64BindVariable(1),
+		map[string]interface{}{
+			"_splitquery_prev_id":      int64(1),
+			"_splitquery_prev_user_id": int64(1),
 		})
 	expectedErr := fmt.Errorf("Error accessing database!")
 	expectedCall2.Return(nil, expectedErr)

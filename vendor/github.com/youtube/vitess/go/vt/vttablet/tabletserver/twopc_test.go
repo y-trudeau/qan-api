@@ -1,28 +1,16 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletserver
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
-
-	"golang.org/x/net/context"
 
 	"github.com/youtube/vitess/go/sqltypes"
 
@@ -64,10 +52,10 @@ func TestReadAllRedo(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt01")),
 		}},
 	})
 	prepared, failed, err = tpc.ReadAllRedo(ctx)
@@ -94,15 +82,15 @@ func TestReadAllRedo(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt01")),
 		}, {
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt02"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt02")),
 		}},
 	})
 	prepared, failed, err = tpc.ReadAllRedo(ctx)
@@ -129,20 +117,20 @@ func TestReadAllRedo(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt01")),
 		}, {
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt02"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt02")),
 		}, {
-			sqltypes.NewVarBinary("dtid1"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt11"),
+			sqltypes.MakeString([]byte("dtid1")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt11")),
 		}},
 	})
 	prepared, failed, err = tpc.ReadAllRedo(ctx)
@@ -173,35 +161,35 @@ func TestReadAllRedo(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt01")),
 		}, {
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt02"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt02")),
 		}, {
-			sqltypes.NewVarBinary("dtid1"),
-			sqltypes.NewVarBinary("Failed"),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt11"),
+			sqltypes.MakeString([]byte("dtid1")),
+			sqltypes.MakeString([]byte("Failed")),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt11")),
 		}, {
-			sqltypes.NewVarBinary("dtid2"),
-			sqltypes.NewVarBinary("Failed"),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt21"),
+			sqltypes.MakeString([]byte("dtid2")),
+			sqltypes.MakeString([]byte("Failed")),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt21")),
 		}, {
-			sqltypes.NewVarBinary("dtid2"),
-			sqltypes.NewVarBinary("Failed"),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt22"),
+			sqltypes.MakeString([]byte("dtid2")),
+			sqltypes.MakeString([]byte("Failed")),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt22")),
 		}, {
-			sqltypes.NewVarBinary("dtid3"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("stmt31"),
+			sqltypes.MakeString([]byte("dtid3")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("stmt31")),
 		}},
 	})
 	prepared, failed, err = tpc.ReadAllRedo(ctx)
@@ -266,11 +254,11 @@ func TestReadAllTransactions(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("ks01"),
-			sqltypes.NewVarBinary("shard01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("ks01")),
+			sqltypes.MakeString([]byte("shard01")),
 		}},
 	})
 	distributed, err = tpc.ReadAllTransactions(ctx)
@@ -299,17 +287,17 @@ func TestReadAllTransactions(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("ks01"),
-			sqltypes.NewVarBinary("shard01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("ks01")),
+			sqltypes.MakeString([]byte("shard01")),
 		}, {
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("ks02"),
-			sqltypes.NewVarBinary("shard02"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("ks02")),
+			sqltypes.MakeString([]byte("shard02")),
 		}},
 	})
 	distributed, err = tpc.ReadAllTransactions(ctx)
@@ -341,23 +329,23 @@ func TestReadAllTransactions(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("ks01"),
-			sqltypes.NewVarBinary("shard01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("ks01")),
+			sqltypes.MakeString([]byte("shard01")),
 		}, {
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("ks02"),
-			sqltypes.NewVarBinary("shard02"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("ks02")),
+			sqltypes.MakeString([]byte("shard02")),
 		}, {
-			sqltypes.NewVarBinary("dtid1"),
-			sqltypes.NewInt64(RedoStatePrepared),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("ks11"),
-			sqltypes.NewVarBinary("shard11"),
+			sqltypes.MakeString([]byte("dtid1")),
+			sqltypes.MakeString([]byte(strconv.Itoa(RedoStatePrepared))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("ks11")),
+			sqltypes.MakeString([]byte("shard11")),
 		}},
 	})
 	distributed, err = tpc.ReadAllTransactions(ctx)

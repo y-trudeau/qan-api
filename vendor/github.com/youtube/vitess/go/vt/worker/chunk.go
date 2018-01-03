@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package worker
 
 import (
@@ -101,8 +85,8 @@ func generateChunks(ctx context.Context, wr *wrangler.Wrangler, tablet *topodata
 	}
 
 	result := sqltypes.Proto3ToResult(qr)
-	min, _ := sqltypes.ToNative(result.Rows[0][0])
-	max, _ := sqltypes.ToNative(result.Rows[0][1])
+	min := result.Rows[0][0].ToNative()
+	max := result.Rows[0][1].ToNative()
 
 	if min == nil || max == nil {
 		wr.Logger().Infof("table=%v: Not splitting the table into multiple chunks, min or max is NULL: %v", td.Name, qr.Rows[0])
@@ -182,11 +166,11 @@ func add(start, interval interface{}) interface{} {
 }
 
 func toChunk(start, end interface{}, number, total int) (chunk, error) {
-	startValue, err := sqltypes.InterfaceToValue(start)
+	startValue, err := sqltypes.BuildValue(start)
 	if err != nil {
 		return chunk{}, fmt.Errorf("Failed to convert calculated start value (%v) into internal sqltypes.Value: %v", start, err)
 	}
-	endValue, err := sqltypes.InterfaceToValue(end)
+	endValue, err := sqltypes.BuildValue(end)
 	if err != nil {
 		return chunk{}, fmt.Errorf("Failed to convert calculated end value (%v) into internal sqltypes.Value: %v", end, err)
 	}

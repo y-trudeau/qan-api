@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package connpool
 
@@ -22,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/youtube/vitess/go/mysql/fakesqldb"
-	"github.com/youtube/vitess/go/vt/callerid"
-
+	"github.com/youtube/vitess/go/mysqlconn/fakesqldb"
 	"golang.org/x/net/context"
 )
 
@@ -32,72 +18,16 @@ func TestConnPoolGet(t *testing.T) {
 	db := fakesqldb.New(t)
 	defer db.Close()
 	connPool := newPool()
-	connPool.Open(db.ConnParams(), db.ConnParams(), db.ConnParams())
+	connPool.Open(db.ConnParams(), db.ConnParams())
 	defer connPool.Close()
 	dbConn, err := connPool.Get(context.Background())
 	if err != nil {
-		t.Fatalf("should not get an error, but got: %v", err)
+		t.Fatalf("should get an error, but got: %v", err)
 	}
 	if dbConn == nil {
 		t.Fatalf("db conn should not be nil")
 	}
-	// There is no context, it should not use appdebug connection
-	if dbConn.pool == nil {
-		t.Fatalf("db conn pool should not be nil")
-	}
 	dbConn.Recycle()
-}
-
-func TestConnPoolGetEmptyDebugConfig(t *testing.T) {
-	db := fakesqldb.New(t)
-	debugConn := db.ConnParamsWithUname("")
-	defer db.Close()
-	connPool := newPool()
-	connPool.Open(db.ConnParams(), db.ConnParams(), debugConn)
-	im := callerid.NewImmediateCallerID("")
-	ecid := callerid.NewEffectiveCallerID("p", "c", "sc")
-	ctx := context.Background()
-	ctx = callerid.NewContext(ctx, ecid, im)
-	defer connPool.Close()
-	dbConn, err := connPool.Get(ctx)
-	if err != nil {
-		t.Fatalf("should not get an error, but got: %v", err)
-	}
-	if dbConn == nil {
-		t.Fatalf("db conn should not be nil")
-	}
-	// Context is empty, it should not use appdebug connection
-	if dbConn.pool == nil {
-		t.Fatalf("db conn pool should not be nil")
-	}
-	dbConn.Recycle()
-}
-
-func TestConnPoolGetAppDebug(t *testing.T) {
-	db := fakesqldb.New(t)
-	debugConn := db.ConnParamsWithUname("debugUsername")
-	ctx := context.Background()
-	im := callerid.NewImmediateCallerID("debugUsername")
-	ecid := callerid.NewEffectiveCallerID("p", "c", "sc")
-	ctx = callerid.NewContext(ctx, ecid, im)
-	defer db.Close()
-	connPool := newPool()
-	connPool.Open(db.ConnParams(), db.ConnParams(), debugConn)
-	defer connPool.Close()
-	dbConn, err := connPool.Get(ctx)
-	if err != nil {
-		t.Fatalf("should not get an error, but got: %v", err)
-	}
-	if dbConn == nil {
-		t.Fatalf("db conn should not be nil")
-	}
-	if dbConn.pool != nil {
-		t.Fatalf("db conn pool should be nil for appDebug")
-	}
-	dbConn.Recycle()
-	if !dbConn.IsClosed() {
-		t.Fatalf("db conn should be closed after recycle")
-	}
 }
 
 func TestConnPoolPutWhilePoolIsClosed(t *testing.T) {
@@ -114,7 +44,7 @@ func TestConnPoolSetCapacity(t *testing.T) {
 	db := fakesqldb.New(t)
 	defer db.Close()
 	connPool := newPool()
-	connPool.Open(db.ConnParams(), db.ConnParams(), db.ConnParams())
+	connPool.Open(db.ConnParams(), db.ConnParams())
 	defer connPool.Close()
 	err := connPool.SetCapacity(-10)
 	if err == nil {
@@ -136,7 +66,7 @@ func TestConnPoolStatJSON(t *testing.T) {
 	if connPool.StatsJSON() != "{}" {
 		t.Fatalf("pool is closed, stats json should be empty: {}")
 	}
-	connPool.Open(db.ConnParams(), db.ConnParams(), db.ConnParams())
+	connPool.Open(db.ConnParams(), db.ConnParams())
 	defer connPool.Close()
 	statsJSON := connPool.StatsJSON()
 	if statsJSON == "" || statsJSON == "{}" {
@@ -171,7 +101,7 @@ func TestConnPoolStateWhilePoolIsOpen(t *testing.T) {
 	defer db.Close()
 	idleTimeout := 10 * time.Second
 	connPool := newPool()
-	connPool.Open(db.ConnParams(), db.ConnParams(), db.ConnParams())
+	connPool.Open(db.ConnParams(), db.ConnParams())
 	defer connPool.Close()
 	if connPool.Capacity() != 100 {
 		t.Fatalf("pool capacity should be 100")

@@ -1,22 +1,9 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package sqlparser
 
-import "strings"
 import "testing"
 
 func TestValid(t *testing.T) {
@@ -275,8 +262,6 @@ func TestValid(t *testing.T) {
 	}, {
 		input: "select /* false */ 1 from t where false",
 	}, {
-		input: "select /* false on left */ 1 from t where false = 0",
-	}, {
 		input: "select /* exists */ 1 from t where exists (select 1 from t)",
 	}, {
 		input: "select /* (boolean) */ 1 from t where not (a = b)",
@@ -464,11 +449,6 @@ func TestValid(t *testing.T) {
 	}, {
 		input: "select /* hex caps */ X'F0a1' from t",
 	}, {
-		input:  "select /* bit literal */ b'0101' from t",
-		output: "select /* bit literal */ B'0101' from t",
-	}, {
-		input: "select /* bit literal caps */ B'010011011010' from t",
-	}, {
 		input: "select /* 0x */ 0xf0 from t",
 	}, {
 		input: "select /* float */ 0.1 from t",
@@ -544,16 +524,9 @@ func TestValid(t *testing.T) {
 		input:  "insert /* set */ into a set a = 1, b = 2",
 		output: "insert /* set */ into a(a, b) values (1, 2)",
 	}, {
-		input:  "insert /* set default */ into a set a = default, b = 2",
-		output: "insert /* set default */ into a(a, b) values (default, 2)",
-	}, {
 		input: "insert /* value expression list */ into a values (a + 1, 2 * 3)",
 	}, {
-		input: "insert /* default */ into a values (default, 2 * 3)",
-	}, {
 		input: "insert /* column list */ into a(a, b) values (1, 2)",
-	}, {
-		input: "insert into a(a, b) values (1, ifnull(null, default(b)))",
 	}, {
 		input: "insert /* qualified column list */ into a(a, b) values (1, 2)",
 	}, {
@@ -605,15 +578,6 @@ func TestValid(t *testing.T) {
 		input:  "update /* table alias */ tt aa set aa.cc = 3",
 		output: "update /* table alias */ tt as aa set aa.cc = 3",
 	}, {
-		input:  "update (select id from foo) subqalias set id = 4",
-		output: "update (select id from foo) as subqalias set id = 4",
-	}, {
-		input:  "update foo f, bar b set f.id = b.id where b.name = 'test'",
-		output: "update foo as f, bar as b set f.id = b.id where b.name = 'test'",
-	}, {
-		input:  "update foo f join bar b on f.name = b.name set f.id = b.id where b.name = 'test'",
-		output: "update foo as f join bar as b on f.name = b.name set f.id = b.id where b.name = 'test'",
-	}, {
 		input: "delete /* simple */ from a",
 	}, {
 		input: "delete /* a.b */ from a.b",
@@ -624,28 +588,7 @@ func TestValid(t *testing.T) {
 	}, {
 		input: "delete /* limit */ from a limit b",
 	}, {
-		input: "delete a from a join b on a.id = b.id where b.name = 'test'",
-	}, {
-		input: "delete a, b from a, b where a.id = b.id and b.name = 'test'",
-	}, {
 		input: "set /* simple */ a = 3",
-	}, {
-		input: "set character_set_results = utf8",
-	}, {
-		input:  "set names utf8 collate foo",
-		output: "set ",
-	}, {
-		input:  "set character set utf8",
-		output: "set ",
-	}, {
-		input:  "set character set 'utf8'",
-		output: "set ",
-	}, {
-		input:  "set character set \"utf8\"",
-		output: "set ",
-	}, {
-		input:  "set charset default",
-		output: "set ",
 	}, {
 		input: "set /* list */ a = 3, b = 4",
 	}, {
@@ -706,37 +649,11 @@ func TestValid(t *testing.T) {
 		input:  "alter table a rename key foo to bar",
 		output: "alter table a",
 	}, {
-		input:  "alter table e auto_increment = 20",
-		output: "alter table e",
-	}, {
-		input:  "alter table e character set = 'ascii'",
-		output: "alter table e",
-	}, {
-		input:  "alter table e default character set = 'ascii'",
-		output: "alter table e",
-	}, {
-		input:  "alter table e comment = 'hello'",
-		output: "alter table e",
-	}, {
-		input:  "alter table a reorganize partition b into (partition c values less than (?), partition d values less than (maxvalue))",
-		output: "alter table a reorganize partition b into (partition c values less than (:v1), partition d values less than (maxvalue))",
-	}, {
-		input:  "alter table a partition by range (id) (partition p0 values less than (10), partition p1 values less than (maxvalue))",
-		output: "alter table a",
-	}, {
 		input: "create table a",
 	}, {
-		input: "create table a (\n\t`a` int\n)",
+		input: "create table `by`",
 	}, {
-		input: "create table `by` (\n\t`by` char\n)",
-	}, {
-		input:  "create table if not exists a (\n\t`a` int\n)",
-		output: "create table a (\n\t`a` int\n)",
-	}, {
-		input:  "create table a ignore me this is garbage",
-		output: "create table a",
-	}, {
-		input:  "create table a (a int, b char, c garbage)",
+		input:  "create table if not exists a",
 		output: "create table a",
 	}, {
 		input:  "create index a on b",
@@ -802,32 +719,14 @@ func TestValid(t *testing.T) {
 		input:  "show foobar",
 		output: "show unsupported",
 	}, {
-		input:  "use db",
-		output: "use db",
-	}, {
-		input:  "use duplicate",
-		output: "use `duplicate`",
-	}, {
-		input:  "use `ks:-80@master`",
-		output: "use `ks:-80@master`",
-	}, {
 		input:  "describe foobar",
-		output: "otherread",
-	}, {
-		input:  "desc foobar",
-		output: "otherread",
+		output: "other",
 	}, {
 		input:  "explain foobar",
-		output: "otherread",
+		output: "other",
 	}, {
 		input:  "truncate foo",
-		output: "otheradmin",
-	}, {
-		input:  "repair foo",
-		output: "otheradmin",
-	}, {
-		input:  "optimize foo",
-		output: "otheradmin",
+		output: "other",
 	}, {
 		input: "select /* EQ true */ 1 from t where a = true",
 	}, {
@@ -921,7 +820,7 @@ func TestCaseSensitivity(t *testing.T) {
 		input  string
 		output string
 	}{{
-		input: "create table A (\n\t`B` int\n)",
+		input: "create table A",
 	}, {
 		input:  "create index b on A",
 		output: "alter table A",
@@ -981,8 +880,8 @@ func TestCaseSensitivity(t *testing.T) {
 	}, {
 		input: "insert into A(A, B) values (1, 2)",
 	}, {
-		input:  "CREATE TABLE A (\n\t`A` int\n)",
-		output: "create table A (\n\t`A` int\n)",
+		input:  "CREATE TABLE A",
+		output: "create table A",
 	}, {
 		input:  "create view A",
 		output: "create table a",
@@ -1150,8 +1049,6 @@ func TestConvert(t *testing.T) {
 		input: "select convert('abc', datetime) from t",
 	}, {
 		input: "select convert('abc', json) from t",
-	}, {
-		input: "select convert('abc' using ascii) from t",
 	}}
 
 	for _, tcase := range validSQL {
@@ -1197,166 +1094,6 @@ func TestConvert(t *testing.T) {
 	}
 }
 
-func TestCreateTable(t *testing.T) {
-	validSQL := []string{
-		// test all the data types and options
-		"create table t (\n" +
-			"	`col_bit` bit,\n" +
-			"	`col_tinyint` tinyint auto_increment,\n" +
-			"	`col_tinyint3` tinyint(3) unsigned,\n" +
-			"	`col_smallint` smallint,\n" +
-			"	`col_smallint4` smallint(4) zerofill,\n" +
-			"	`col_mediumint` mediumint,\n" +
-			"	`col_mediumint5` mediumint(5) unsigned not null,\n" +
-			"	`col_int` int,\n" +
-			"	`col_int10` int(10) not null,\n" +
-			"	`col_integer` integer comment 'this is an integer',\n" +
-			"	`col_bigint` bigint,\n" +
-			"	`col_bigint10` bigint(10) zerofill not null default 10,\n" +
-			"	`col_real` real,\n" +
-			"	`col_real2` real(1,2) not null default 1.23,\n" +
-			"	`col_double` double,\n" +
-			"	`col_double2` double(3,4) not null default 1.23,\n" +
-			"	`col_float` float,\n" +
-			"	`col_float2` float(3,4) not null default 1.23,\n" +
-			"	`col_decimal` decimal,\n" +
-			"	`col_decimal2` decimal(2),\n" +
-			"	`col_decimal3` decimal(2,3),\n" +
-			"	`col_numeric` numeric,\n" +
-			"	`col_numeric2` numeric(2),\n" +
-			"	`col_numeric3` numeric(2,3),\n" +
-			"	`col_date` date,\n" +
-			"	`col_time` time,\n" +
-			"	`col_timestamp` timestamp,\n" +
-			"	`col_datetime` datetime,\n" +
-			"	`col_year` year,\n" +
-			"	`col_char` char,\n" +
-			"	`col_char2` char(2),\n" +
-			"	`col_char3` char(3) character set ascii,\n" +
-			"	`col_char4` char(4) character set ascii collate ascii_bin,\n" +
-			"	`col_varchar` varchar,\n" +
-			"	`col_varchar2` varchar(2),\n" +
-			"	`col_varchar3` varchar(3) character set ascii,\n" +
-			"	`col_varchar4` varchar(4) character set ascii collate ascii_bin,\n" +
-			"	`col_binary` binary,\n" +
-			"	`col_varbinary` varbinary(10),\n" +
-			"	`col_tinyblob` tinyblob,\n" +
-			"	`col_blob` blob,\n" +
-			"	`col_mediumblob` mediumblob,\n" +
-			"	`col_longblob` longblob,\n" +
-			"	`col_tinytext` tinytext,\n" +
-			"	`col_text` text,\n" +
-			"	`col_mediumtext` mediumtext,\n" +
-			"	`col_longtext` longtext,\n" +
-			"	`col_text` text character set ascii collate ascii_bin,\n" +
-			"	`col_json` json,\n" +
-			"	`col_enum` enum('a', 'b', 'c', 'd')\n" +
-			")",
-
-		// test defaults
-		"create table t (\n" +
-			"	`i1` int default 1,\n" +
-			"	`i2` int default null,\n" +
-			"	`f1` float default 1.23,\n" +
-			"	`s1` varchar default 'c',\n" +
-			"	`s2` varchar default 'this is a string',\n" +
-			"	`s3` varchar default null\n" +
-			")",
-
-		// test key field options
-		"create table t (\n" +
-			"	`id` int auto_increment primary key,\n" +
-			"	`username` varchar unique key,\n" +
-			"	`email` varchar unique,\n" +
-			"	`full_name` varchar key\n" +
-			")",
-
-		// test defining indexes separately
-		"create table t (\n" +
-			"	`id` int auto_increment,\n" +
-			"	`username` varchar,\n" +
-			"	`email` varchar,\n" +
-			"	`full_name` varchar,\n" +
-			"	`status` varchar,\n" +
-			"	primary key (`id`),\n" +
-			"	unique key `by_username` (`username`),\n" +
-			"	unique `by_username2` (`username`),\n" +
-			"	unique index `by_username3` (`username`),\n" +
-			"	index `by_status` (`status`),\n" +
-			"	key `by_full_name` (`full_name`)\n" +
-			")",
-
-		// multi-column indexes
-		"create table t (\n" +
-			"	`id` int auto_increment,\n" +
-			"	`username` varchar,\n" +
-			"	`email` varchar,\n" +
-			"	`full_name` varchar,\n" +
-			"	`a` int,\n" +
-			"	`b` int,\n" +
-			"	`c` int,\n" +
-			"	primary key (`id`, `username`),\n" +
-			"	unique key `by_abc` (`a`, `b`, `c`),\n" +
-			"	key `by_email` (`email`(10), `username`)\n" +
-			")",
-
-		// table options
-		"create table t (\n" +
-			"	`id` int auto_increment\n" +
-			") engine InnoDB,\n" +
-			"  auto_increment 123,\n" +
-			"  avg_row_length 1,\n" +
-			"  default character set utf8mb4,\n" +
-			"  character set latin1,\n" +
-			"  checksum 0,\n" +
-			"  default collate binary,\n" +
-			"  collate ascii_bin,\n" +
-			"  comment 'this is a comment',\n" +
-			"  compression 'zlib',\n" +
-			"  connection 'connect_string',\n" +
-			"  data directory 'absolute path to directory',\n" +
-			"  delay_key_write 1,\n" +
-			"  encryption 'n',\n" +
-			"  index directory 'absolute path to directory',\n" +
-			"  insert_method no,\n" +
-			"  key_block_size 1024,\n" +
-			"  max_rows 100,\n" +
-			"  min_rows 10,\n" +
-			"  pack_keys 0,\n" +
-			"  password 'sekret',\n" +
-			"  row_format default,\n" +
-			"  stats_auto_recalc default,\n" +
-			"  stats_persistent 0,\n" +
-			"  stats_sample_pages 1,\n" +
-			"  tablespace tablespace_name storage disk,\n" +
-			"  tablespace tablespace_name\n",
-	}
-	for _, sql := range validSQL {
-		sql = strings.TrimSpace(sql)
-		tree, err := ParseStrictDDL(sql)
-		if err != nil {
-			t.Errorf("input: %s, err: %v", sql, err)
-			continue
-		}
-		got := String(tree.(*DDL))
-
-		if sql != got {
-			t.Errorf("want:\n%s\ngot:\n%s", sql, got)
-		}
-	}
-
-	sql := "create table t garbage"
-	tree, err := Parse(sql)
-	if err != nil {
-		t.Errorf("input: %s, err: %v", sql, err)
-	}
-
-	tree, err = ParseStrictDDL(sql)
-	if tree != nil || err == nil {
-		t.Errorf("ParseStrictDDL unexpectedly accepted input %s", sql)
-	}
-}
-
 func TestErrors(t *testing.T) {
 	invalidSQL := []struct {
 		input  string
@@ -1397,6 +1134,9 @@ func TestErrors(t *testing.T) {
 	}, {
 		input:  "update a set c = values(1)",
 		output: "syntax error at position 26 near '1'",
+	}, {
+		input:  "update a set c = last_insert_id(1)",
+		output: "syntax error at position 32 near 'last_insert_id'",
 	}, {
 		input: "select(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F" +
 			"(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(F(" +
@@ -1452,6 +1192,9 @@ func TestErrors(t *testing.T) {
 		input:  "select 1 from t where binary",
 		output: "syntax error at position 30",
 	}, {
+		input:  "update (select id from foo) subqalias set id = 4",
+		output: "syntax error at position 9",
+	}, {
 		input:  "select match(a1, a2) against ('foo' in boolean mode with query expansion) from t",
 		output: "syntax error at position 57 near 'with'",
 	}, {
@@ -1477,10 +1220,6 @@ func TestErrors(t *testing.T) {
 		}
 	}
 }
-
-// Benchmark run on 6/23/17, prior to improvements:
-// BenchmarkParse1-4         100000             16334 ns/op
-// BenchmarkParse2-4          30000             44121 ns/op
 
 func BenchmarkParse1(b *testing.B) {
 	sql := "select 'abcd', 20, 30.0, eid from a where 1=eid and name='3'"

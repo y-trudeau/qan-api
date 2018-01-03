@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package vindexes
 
@@ -63,15 +51,16 @@ func TestNumericStaticMapMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create vindex: %v", err)
 	}
-	got, err := numericStaticMap.(Unique).Map(nil, []sqltypes.Value{
-		sqltypes.NewInt64(1),
-		sqltypes.NewInt64(2),
-		sqltypes.NewInt64(3),
-		sqltypes.NewInt64(4),
-		sqltypes.NewInt64(5),
-		sqltypes.NewInt64(6),
-		sqltypes.NewInt64(7),
-		sqltypes.NewInt64(8),
+	sqlVal, _ := sqltypes.BuildIntegral("8")
+	got, err := numericStaticMap.(Unique).Map(nil, []interface{}{
+		1,
+		int32(2),
+		int64(3),
+		uint(4),
+		uint32(5),
+		uint64(6),
+		[]byte("7"),
+		sqlVal,
 	})
 	if err != nil {
 		t.Error(err)
@@ -99,8 +88,8 @@ func TestNumericStaticMapMapBadData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create vindex: %v", err)
 	}
-	_, err = numericStaticMap.(Unique).Map(nil, []sqltypes.Value{sqltypes.NewFloat64(1.1)})
-	want := `NumericStaticMap.Map: could not parse value: 1.1`
+	_, err = numericStaticMap.(Unique).Map(nil, []interface{}{1.1})
+	want := `NumericStaticMap.Map: getNumber: unexpected type for 1.1: float64`
 	if err == nil || err.Error() != want {
 		t.Errorf("NumericStaticMap.Map: %v, want %v", err, want)
 	}
@@ -111,21 +100,38 @@ func TestNumericStaticMapVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create vindex: %v", err)
 	}
-	got, err := numericStaticMap.Verify(nil,
-		[]sqltypes.Value{sqltypes.NewInt64(1), sqltypes.NewInt64(2)},
-		[][]byte{[]byte("\x00\x00\x00\x00\x00\x00\x00\x01"), []byte("\x00\x00\x00\x00\x00\x00\x00\x01")})
+	success, err := numericStaticMap.Verify(nil, []interface{}{1}, [][]byte{[]byte("\x00\x00\x00\x00\x00\x00\x00\x01")})
 	if err != nil {
 		t.Error(err)
 	}
-	want := []bool{true, false}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("lhu.Verify(match): %v, want %v", got, want)
+	if !success {
+		t.Errorf("Verify(): %+v, want true", success)
+	}
+}
+
+func TestNumericStaticMapVerifyNeg(t *testing.T) {
+	numericStaticMap, err := createVindex()
+	if err != nil {
+		t.Fatalf("failed to create vindex: %v", err)
+	}
+	_, err = numericStaticMap.Verify(nil, []interface{}{1, 2}, [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6")})
+	want := "NumericStaticMap.Verify: length of ids 2 doesn't match length of ksids 1"
+	if err.Error() != want {
+		t.Error(err.Error())
 	}
 
-	// Failure test
-	_, err = numericStaticMap.Verify(nil, []sqltypes.Value{sqltypes.NewVarBinary("aa")}, [][]byte{nil})
-	wantErr := "NumericStaticMap.Verify: could not parse value: aa"
-	if err == nil || err.Error() != wantErr {
-		t.Errorf("hash.Verify err: %v, want %s", err, wantErr)
+	_, err = numericStaticMap.Verify(nil, []interface{}{1.1}, [][]byte{[]byte("\x00\x00\x00\x00\x00\x00\x00\x01")})
+	want = `NumericStaticMap.Verify: getNumber: unexpected type for 1.1: float64`
+	if err == nil || err.Error() != want {
+		t.Errorf("numericStaticMap.Map: %v, want %v", err, want)
 	}
+
+	success, err := numericStaticMap.Verify(nil, []interface{}{1}, [][]byte{[]byte("\x00\x00\x00\x00\x00\x00\x00\x02")})
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	if success {
+		t.Errorf("Numeric.Verify(): %+v, want false", success)
+	}
+
 }

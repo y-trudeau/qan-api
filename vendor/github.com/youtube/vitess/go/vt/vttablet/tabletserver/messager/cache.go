@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2017, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package messager
 
@@ -26,12 +14,11 @@ import (
 //_______________________________________________
 
 // MessageRow represents a message row.
-// The first column in Row is always the "id".
 type MessageRow struct {
-	TimeNext    int64
-	Epoch       int64
-	TimeCreated int64
-	Row         []sqltypes.Value
+	TimeNext int64
+	Epoch    int64
+	ID       sqltypes.Value
+	Message  sqltypes.Value
 }
 
 type messageHeap []*MessageRow
@@ -98,7 +85,7 @@ func (mc *cache) Add(mr *MessageRow) bool {
 	if len(mc.sendQueue) >= mc.size {
 		return false
 	}
-	id := mr.Row[0].ToString()
+	id := mr.ID.String()
 	// Don't check for nil. Messages that are popped for
 	// send are nilled out.
 	if _, ok := mc.messages[id]; ok {
@@ -123,7 +110,7 @@ func (mc *cache) Pop() *MessageRow {
 			return nil
 		}
 		mr := heap.Pop(&mc.sendQueue).(*MessageRow)
-		id := mr.Row[0].ToString()
+		id := mr.ID.String()
 		// If message was previously marked as defunct, drop
 		// it and continue.
 		if id == "" {
@@ -145,7 +132,9 @@ func (mc *cache) Discard(ids []string) {
 		if mr := mc.messages[id]; mr != nil {
 			// The row is still in the queue somewhere. Mark
 			// it as defunct. It will be "garbage collected" later.
-			mr.Row[0] = sqltypes.NULL
+			mr.ID = sqltypes.NULL
+			// "Free" the message.
+			mr.Message = sqltypes.NULL
 		}
 		delete(mc.messages, id)
 	}

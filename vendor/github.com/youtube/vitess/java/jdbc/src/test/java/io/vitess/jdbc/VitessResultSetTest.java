@@ -1,28 +1,15 @@
-/*
- * Copyright 2017 Google Inc.
- * 
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * 
- *     http://www.apache.org/licenses/LICENSE-2.0
- * 
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package io.vitess.jdbc;
 
 import com.google.protobuf.ByteString;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
+import io.vitess.client.cursor.Cursor;
+import io.vitess.client.cursor.SimpleCursor;
+import io.vitess.proto.Query;
+import io.vitess.util.MysqlDefs;
+import io.vitess.util.StringUtils;
+import io.vitess.util.charset.CharsetMapping;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.sql.Clob;
 import java.sql.SQLException;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -34,13 +21,6 @@ import org.mockito.internal.verification.VerificationModeFactory;
 import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
-
-import io.vitess.client.cursor.Cursor;
-import io.vitess.client.cursor.SimpleCursor;
-import io.vitess.proto.Query;
-import io.vitess.util.MysqlDefs;
-import io.vitess.util.StringUtils;
-import io.vitess.util.charset.CharsetMapping;
 
 /**
  * Created by harshit.gangal on 19/01/16.
@@ -92,18 +72,25 @@ public class VitessResultSetTest extends BaseTest {
             .addFields(Query.Field.newBuilder().setName("col8").setType(Query.Type.UINT32).build())
             .addFields(Query.Field.newBuilder().setName("col9").setType(Query.Type.INT64).build())
             .addFields(Query.Field.newBuilder().setName("col10").setType(Query.Type.UINT64).build())
-            .addFields(Query.Field.newBuilder().setName("col11").setType(Query.Type.FLOAT32).build())
-            .addFields(Query.Field.newBuilder().setName("col12").setType(Query.Type.FLOAT64).build())
-            .addFields(Query.Field.newBuilder().setName("col13").setType(Query.Type.TIMESTAMP).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col11").setType(Query.Type.FLOAT32).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col12").setType(Query.Type.FLOAT64).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col13").setType(Query.Type.TIMESTAMP).build())
             .addFields(Query.Field.newBuilder().setName("col14").setType(Query.Type.DATE).build())
             .addFields(Query.Field.newBuilder().setName("col15").setType(Query.Type.TIME).build())
-            .addFields(Query.Field.newBuilder().setName("col16").setType(Query.Type.DATETIME).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col16").setType(Query.Type.DATETIME).build())
             .addFields(Query.Field.newBuilder().setName("col17").setType(Query.Type.YEAR).build())
-            .addFields(Query.Field.newBuilder().setName("col18").setType(Query.Type.DECIMAL).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col18").setType(Query.Type.DECIMAL).build())
             .addFields(Query.Field.newBuilder().setName("col19").setType(Query.Type.TEXT).build())
             .addFields(Query.Field.newBuilder().setName("col20").setType(Query.Type.BLOB).build())
-            .addFields(Query.Field.newBuilder().setName("col21").setType(Query.Type.VARCHAR).build())
-            .addFields(Query.Field.newBuilder().setName("col22").setType(Query.Type.VARBINARY).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col21").setType(Query.Type.VARCHAR).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col22").setType(Query.Type.VARBINARY).build())
             .addFields(Query.Field.newBuilder().setName("col23").setType(Query.Type.CHAR).build())
             .addFields(Query.Field.newBuilder().setName("col24").setType(Query.Type.BINARY).build())
             .addFields(Query.Field.newBuilder().setName("col25").setType(Query.Type.BIT).build())
@@ -121,12 +108,13 @@ public class VitessResultSetTest extends BaseTest {
                 .addLengths("HELLO TDS TEAM".length()).addLengths("HELLO TDS TEAM".length())
                 .addLengths("N".length()).addLengths("HELLO TDS TEAM".length())
                 .addLengths("1".length()).addLengths("val123".length())
-                .addLengths("val123".length()).setValues(ByteString.copyFromUtf8(
-                "-5050-2300023000-100100-100100-1000100024.52100.432016-02-06 " +
-                "14:15:162016-02-0612:34:562016-02-06 14:15:1620161234.56789HELLO TDS TEAMHELLO TDS TEAMHELLO" +
-                " TDS TEAMHELLO TDS TEAMNHELLO TDS TEAM1val123val123"))).build());
+                .addLengths("val123".length()).setValues(ByteString
+                    .copyFromUtf8("-5050-2300023000-100100-100100-1000100024.52100.432016-02-06 " +
+                        "14:15:162016-02-0612:34:562016-02-06 14:15:1620161234.56789HELLO TDS TEAMHELLO TDS TEAMHELLO"
+                        +
+                        " TDS TEAMHELLO TDS TEAMNHELLO TDS TEAM1val123val123"))).build());
     }
-    
+
     public Cursor getCursorWithRowsAsNull() {
         /*
         INT8(1, 257), -50
@@ -170,18 +158,25 @@ public class VitessResultSetTest extends BaseTest {
             .addFields(Query.Field.newBuilder().setName("col8").setType(Query.Type.UINT32).build())
             .addFields(Query.Field.newBuilder().setName("col9").setType(Query.Type.INT64).build())
             .addFields(Query.Field.newBuilder().setName("col10").setType(Query.Type.UINT64).build())
-            .addFields(Query.Field.newBuilder().setName("col11").setType(Query.Type.FLOAT32).build())
-            .addFields(Query.Field.newBuilder().setName("col12").setType(Query.Type.FLOAT64).build())
-            .addFields(Query.Field.newBuilder().setName("col13").setType(Query.Type.TIMESTAMP).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col11").setType(Query.Type.FLOAT32).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col12").setType(Query.Type.FLOAT64).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col13").setType(Query.Type.TIMESTAMP).build())
             .addFields(Query.Field.newBuilder().setName("col14").setType(Query.Type.DATE).build())
             .addFields(Query.Field.newBuilder().setName("col15").setType(Query.Type.TIME).build())
-            .addFields(Query.Field.newBuilder().setName("col16").setType(Query.Type.DATETIME).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col16").setType(Query.Type.DATETIME).build())
             .addFields(Query.Field.newBuilder().setName("col17").setType(Query.Type.YEAR).build())
-            .addFields(Query.Field.newBuilder().setName("col18").setType(Query.Type.DECIMAL).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col18").setType(Query.Type.DECIMAL).build())
             .addFields(Query.Field.newBuilder().setName("col19").setType(Query.Type.TEXT).build())
             .addFields(Query.Field.newBuilder().setName("col20").setType(Query.Type.BLOB).build())
-            .addFields(Query.Field.newBuilder().setName("col21").setType(Query.Type.VARCHAR).build())
-            .addFields(Query.Field.newBuilder().setName("col22").setType(Query.Type.VARBINARY).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col21").setType(Query.Type.VARCHAR).build())
+            .addFields(
+                Query.Field.newBuilder().setName("col22").setType(Query.Type.VARBINARY).build())
             .addFields(Query.Field.newBuilder().setName("col23").setType(Query.Type.CHAR).build())
             .addFields(Query.Field.newBuilder().setName("col24").setType(Query.Type.BINARY).build())
             .addFields(Query.Field.newBuilder().setName("col25").setType(Query.Type.BIT).build())
@@ -198,11 +193,14 @@ public class VitessResultSetTest extends BaseTest {
                 .addLengths("HELLO TDS TEAM".length()).addLengths("HELLO TDS TEAM".length())
                 .addLengths("HELLO TDS TEAM".length()).addLengths("HELLO TDS TEAM".length())
                 .addLengths("N".length()).addLengths("HELLO TDS TEAM".length())
-                .addLengths("0".length()).addLengths("val123".length()).addLengths(-1).setValues(ByteString.copyFromUtf8(
-                "-5050-2300023000-100100-100100-1000100024.52100.432016-02-06 " +
-                "14:15:162016-02-0612:34:562016-02-06 14:15:1620161234.56789HELLO TDS TEAMHELLO TDS " +
-                "TEAMHELLO TDS TEAMHELLO TDS TEAMNHELLO TDS TEAM0val123"))).build());
+                .addLengths("0".length()).addLengths("val123".length()).addLengths(-1).setValues(
+                    ByteString.copyFromUtf8(
+                        "-5050-2300023000-100100-100100-1000100024.52100.432016-02-06 " +
+                            "14:15:162016-02-0612:34:562016-02-06 14:15:1620161234.56789HELLO TDS TEAMHELLO TDS "
+                            +
+                            "TEAMHELLO TDS TEAMHELLO TDS TEAMNHELLO TDS TEAM0val123"))).build());
     }
+
 
     @Test public void testNextWithZeroRows() throws Exception {
         Cursor cursor = new SimpleCursor(Query.QueryResult.newBuilder()
@@ -252,14 +250,6 @@ public class VitessResultSetTest extends BaseTest {
         Assert.assertEquals("0", vitessResultSet.getString(25));
         Assert.assertEquals("val123", vitessResultSet.getString(26));
         Assert.assertEquals(null, vitessResultSet.getString(27));
-    }
-
-    @Test public void getObjectUint64AsBigInteger() throws SQLException {
-        Cursor cursor = getCursorWithRowsAsNull();
-        VitessResultSet vitessResultSet = new VitessResultSet(cursor, getVitessStatement());
-        vitessResultSet.next();
-
-        Assert.assertEquals(new BigInteger("1000"), vitessResultSet.getObject(10));
     }
 
     @Test public void testgetBoolean() throws SQLException {
@@ -488,23 +478,6 @@ public class VitessResultSetTest extends BaseTest {
         // .getAsciiStream(19));
     }
 
-    @Test public void testGetBinaryStream() throws SQLException, IOException {
-        Cursor cursor = getCursorWithRowsAsNull();
-        VitessResultSet vitessResultSet = new VitessResultSet(cursor, getVitessStatement());
-        vitessResultSet.next();
-        byte[] ba1 = new byte[128];
-        new ByteArrayInputStream("HELLO TDS TEAM".getBytes()).read(ba1, 0, 128);
-        byte[] ba2 = new byte[128];
-        vitessResultSet.getBinaryStream(19).read(ba2, 0, 128);
-        Assert.assertArrayEquals(ba1, ba2);
-
-        byte[] ba3 = new byte[128];
-        vitessResultSet.getBinaryStream(22).read(ba3, 0, 128);
-        Assert.assertArrayEquals(ba1, ba3);
-
-        Assert.assertEquals(null, vitessResultSet.getBinaryStream(27));
-    }
-
     @Test public void testEnhancedFieldsFromCursor() throws Exception {
         Cursor cursor = getCursorWithRows();
         VitessResultSet vitessResultSet = new VitessResultSet(cursor, getVitessStatement());
@@ -652,7 +625,6 @@ public class VitessResultSetTest extends BaseTest {
         String varcharStr = "i have a variable length!";
         String masqueradingBlobStr = "look at me, im a blob";
         String textStr = "an enthralling string of TEXT in some foreign language";
-        String jsonStr = "{\"status\": \"ok\"}";
 
         int paddedCharColLength = 20;
         byte[] trimmedChar = StringUtils.getBytes(trimmedCharStr, "UTF-16");
@@ -660,14 +632,12 @@ public class VitessResultSetTest extends BaseTest {
         byte[] masqueradingBlob = StringUtils.getBytes(masqueradingBlobStr, "US-ASCII");
         byte[] text = StringUtils.getBytes(textStr, "ISO8859_8");
         byte[] opaqueBinary = new byte[] { 1,2,3,4,5,6,7,8,9};
-        byte[] json = StringUtils.getBytes(jsonStr, "UTF-8");
 
         value.write(trimmedChar);
         value.write(varchar);
         value.write(opaqueBinary);
         value.write(masqueradingBlob);
         value.write(text);
-        value.write(json);
 
         Query.QueryResult result = Query.QueryResult.newBuilder()
             // This tests CHAR
@@ -696,17 +666,12 @@ public class VitessResultSetTest extends BaseTest {
                 .setColumnLength(text.length)
                 .setCharset(/* corresponds to greek, from CharsetMapping */25)
                 .setType(Query.Type.TEXT))
-            .addFields(Query.Field.newBuilder().setName("col5")
-                .setColumnLength(json.length)
-                .setCharset(CharsetMapping.MYSQL_COLLATION_INDEX_utf8)
-                .setType(Query.Type.JSON))
             .addRows(Query.Row.newBuilder()
                 .addLengths(trimmedChar.length)
                 .addLengths(varchar.length)
                 .addLengths(opaqueBinary.length)
                 .addLengths(masqueradingBlob.length)
                 .addLengths(text.length)
-                .addLengths(json.length)
                 .setValues(value.toByteString()))
             .build();
 
@@ -719,9 +684,8 @@ public class VitessResultSetTest extends BaseTest {
         Assert.assertArrayEquals(opaqueBinary, (byte[]) vitessResultSet.getObject(3));
         Assert.assertEquals(masqueradingBlobStr, vitessResultSet.getObject(4));
         Assert.assertEquals(textStr, vitessResultSet.getObject(5));
-        Assert.assertEquals(jsonStr, vitessResultSet.getObject(6));
 
-        PowerMockito.verifyPrivate(vitessResultSet, VerificationModeFactory.times(6)).invoke("convertBytesIfPossible", Matchers.any(byte[].class), Matchers.any(FieldWithMetadata.class));
+        PowerMockito.verifyPrivate(vitessResultSet, VerificationModeFactory.times(5)).invoke("convertBytesIfPossible", Matchers.any(byte[].class), Matchers.any(FieldWithMetadata.class));
 
         conn.setIncludedFields(Query.ExecuteOptions.IncludedFields.TYPE_AND_NAME);
         vitessResultSet = PowerMockito.spy(new VitessResultSet(new SimpleCursor(result), new VitessStatement(conn)));
@@ -732,22 +696,7 @@ public class VitessResultSetTest extends BaseTest {
         Assert.assertArrayEquals(opaqueBinary, (byte[]) vitessResultSet.getObject(3));
         Assert.assertArrayEquals(masqueradingBlob, (byte[]) vitessResultSet.getObject(4));
         Assert.assertArrayEquals(text, (byte[]) vitessResultSet.getObject(5));
-        Assert.assertArrayEquals(json, (byte[]) vitessResultSet.getObject(6));
 
         PowerMockito.verifyPrivate(vitessResultSet, VerificationModeFactory.times(0)).invoke("convertBytesIfPossible", Matchers.any(byte[].class), Matchers.any(FieldWithMetadata.class));
-    }
-
-    @Test public void testGetClob() throws SQLException {
-        VitessResultSet vitessResultSet = new VitessResultSet(
-            new String[]{"clob"}, new Query.Type[]{Query.Type.VARCHAR},
-            new String[][]{new String[] {"clobValue"}},
-            new ConnectionProperties());
-        Assert.assertTrue(vitessResultSet.next());
-
-        Clob clob = vitessResultSet.getClob(1);
-        Assert.assertEquals("clobValue", clob.getSubString(1, (int) clob.length()));
-
-        clob = vitessResultSet.getClob("clob");
-        Assert.assertEquals("clobValue", clob.getSubString(1, (int) clob.length()));
     }
 }

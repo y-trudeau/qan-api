@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletmanager
 
@@ -102,17 +90,11 @@ func (agent *ActionAgent) InitTablet(port, gRPCPort int32) error {
 			// There's no existing tablet record, so we can assume
 			// no one has left us a message to step down.
 			tabletType = topodatapb.TabletType_MASTER
-			// Update the TER timestamp (current value is 0) because we
-			// assume that we are actually the MASTER and in case of a tiebreak,
-			// vtgate should prefer us.
-			agent.setExternallyReparentedTime(time.Now())
 		case nil:
 			if oldTablet.Type == topodatapb.TabletType_MASTER {
 				// We're marked as master in the shard record,
 				// and our existing tablet record agrees.
 				tabletType = topodatapb.TabletType_MASTER
-				// Same comment as above. Update tiebreaking timestamp to now.
-				agent.setExternallyReparentedTime(time.Now())
 			}
 		default:
 			return fmt.Errorf("InitTablet failed to read existing tablet record: %v", err)

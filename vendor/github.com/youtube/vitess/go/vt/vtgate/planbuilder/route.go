@@ -1,36 +1,16 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package planbuilder
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 
-	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vtgate/engine"
 	"github.com/youtube/vitess/go/vt/vtgate/vindexes"
 )
-
-var _ builder = (*route)(nil)
-var _ columnOriginator = (*route)(nil)
-
-var errIntermixingUnsupported = errors.New("unsupported: intermixing of information_schema and regular tables")
 
 // route is used to build a Route primitive.
 // It's used to build one of the Select routes like
@@ -38,37 +18,44 @@ var errIntermixingUnsupported = errors.New("unsupported: intermixing of informat
 // are moved into this node, which will be used to build
 // the final SQL for this route.
 type route struct {
-	symtab *symtab
-	order  int
-
 	// Redirect may point to another route if this route
 	// was merged with it. The Resolve function chases
 	// this pointer till the last un-redirected route.
 	Redirect *route
-
+	// IsRHS is true if the route is the RHS of a
+	// LEFT JOIN. If so, many restrictions come into play.
+	IsRHS bool
 	// Select is the AST for the query fragment that will be
 	// executed by this route.
 	Select sqlparser.SelectStatement
-
-	// resultColumns represent the columns returned by this route.
-	resultColumns []*resultColumn
-
-	// condition stores the AST condition that will be used
-	// to resolve the ERoute Values field.
-	condition sqlparser.Expr
-
+	order  int
+	symtab *symtab
+	// Colsyms represent the columns returned by this route.
+	Colsyms []*colsym
 	// ERoute is the primitive being built.
 	ERoute *engine.Route
 }
 
-func newRoute(stmt sqlparser.SelectStatement, eroute *engine.Route, condition sqlparser.Expr, vschema VSchema) *route {
+func newRoute(stmt sqlparser.SelectStatement, eroute *engine.Route, table *vindexes.Table, vschema VSchema, alias *sqlparser.TableName, astName sqlparser.TableIdent) *route {
+	// We have some circular pointer references here:
+	// The route points to the symtab idicating
+	// the symtab that should be used to resolve symbols
+	// for it. This is same as the SELECT statement's symtab.
+	// This pointer is needed because each subquery will have
+	// its own symtab. Multiple routes can point to the same
+	// symtab.
+	// The tabelAlias, which is inside the symtab, points back
+	// to the route to indidcate that the symbol is produced
+	// by this route. A symbol referenced in a route can actually
+	// be pointing to a different route. This information is used
+	// to determine if symbol references are local or not.
 	rb := &route{
-		Select:    stmt,
-		order:     1,
-		condition: condition,
-		ERoute:    eroute,
+		Select: stmt,
+		symtab: newSymtab(vschema),
+		order:  1,
+		ERoute: eroute,
 	}
-	rb.symtab = newSymtabWithRoute(vschema, rb)
+	rb.symtab.AddAlias(alias, astName, table, rb)
 	return rb
 }
 
@@ -81,64 +68,49 @@ func (rb *route) Resolve() *route {
 	return rb
 }
 
-// Symtab satisfies the builder interface.
+// Symtab returns the associated symtab.
 func (rb *route) Symtab() *symtab {
-	return rb.symtab.Resolve()
+	return rb.symtab
 }
 
-// Order returns the order of the route.
+// SetSymtab sets the symtab.
+func (rb *route) SetSymtab(symtab *symtab) {
+	rb.symtab = symtab
+}
+
+// Order returns the order of the node.
 func (rb *route) Order() int {
 	return rb.order
 }
 
-// MaxOrder satisfies the builder interface.
-func (rb *route) MaxOrder() int {
-	return rb.order
-}
-
-// SetOrder satisfies the builder interface.
+// SetOrder sets the order to one above the specified number.
 func (rb *route) SetOrder(order int) {
 	rb.order = order + 1
 }
 
-// Primitive satisfies the builder interface.
+// Primitve returns the built primitive.
 func (rb *route) Primitive() engine.Primitive {
 	return rb.ERoute
 }
 
-// Leftmost satisfies the builder interface.
-func (rb *route) Leftmost() columnOriginator {
+// Leftmost returns the current route.
+func (rb *route) Leftmost() *route {
 	return rb
-}
-
-// ResultColumns satisfies the builder interface.
-func (rb *route) ResultColumns() []*resultColumn {
-	return rb.resultColumns
 }
 
 // Join joins with the RHS. This could produce a merged route
 // or a new join node.
-func (rb *route) Join(rRoute *route, ajoin *sqlparser.JoinTableExpr) (builder, error) {
-	if rb.ERoute.Opcode == engine.SelectNext {
-		return nil, errors.New("unsupported: sequence join with another table")
-	}
-	if rRoute.ERoute.Opcode == engine.SelectNext {
-		return nil, errors.New("unsupported: sequence join with another table")
+func (rb *route) Join(rhs builder, ajoin *sqlparser.JoinTableExpr) (builder, error) {
+	rRoute, ok := rhs.(*route)
+	if !ok {
+		return newJoin(rb, rhs, ajoin)
 	}
 	if rb.ERoute.Keyspace.Name != rRoute.ERoute.Keyspace.Name {
 		return newJoin(rb, rRoute, ajoin)
 	}
-	switch rb.ERoute.Opcode {
-	case engine.SelectUnsharded:
-		if rRoute.ERoute.Opcode == engine.SelectUnsharded {
-			return rb.merge(rRoute, ajoin)
-		}
-		return nil, errIntermixingUnsupported
-	case engine.ExecDBA:
-		if rRoute.ERoute.Opcode == engine.ExecDBA {
-			return rb.merge(rRoute, ajoin)
-		}
-		return nil, errIntermixingUnsupported
+	if rb.ERoute.Opcode == engine.SelectUnsharded {
+		// Two Routes from the same unsharded keyspace can be merged.
+		return rb.merge(rRoute, ajoin)
 	}
 
 	// Both route are sharded routes. For ',' joins (ajoin==nil), don't
@@ -156,12 +128,17 @@ func (rb *route) Join(rRoute *route, ajoin *sqlparser.JoinTableExpr) (builder, e
 
 	// Both l & r routes point to the same shard.
 	if rb.ERoute.Opcode == engine.SelectEqualUnique && rRoute.ERoute.Opcode == engine.SelectEqualUnique {
-		if valEqual(rb.condition, rRoute.condition) {
+		if valEqual(rb.ERoute.Values, rRoute.ERoute.Values) {
 			return rb.merge(rRoute, ajoin)
 		}
 	}
 
 	return newJoin(rb, rRoute, ajoin)
+}
+
+// SetRHS marks the route as RHS.
+func (rb *route) SetRHS() {
+	rb.IsRHS = true
 }
 
 // merge merges the two routes. The ON clause is also analyzed to
@@ -176,13 +153,11 @@ func (rb *route) merge(rhs *route, ajoin *sqlparser.JoinTableExpr) (builder, err
 	} else {
 		sel.From = sqlparser.TableExprs{ajoin}
 		if ajoin.Join == sqlparser.LeftJoinStr {
-			rhs.Symtab().ClearVindexes()
+			rhs.Symtab().SetRHS()
 		}
 	}
-	// Redirect before merging the symtabs. Merge will use Redirect
-	// to check if rhs route matches lhs.
-	rhs.Redirect = rb
 	err := rb.Symtab().Merge(rhs.Symtab())
+	rhs.Redirect = rb
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +167,7 @@ func (rb *route) merge(rhs *route, ajoin *sqlparser.JoinTableExpr) (builder, err
 	for _, filter := range splitAndExpression(nil, ajoin.On) {
 		// If VTGate evolves, this section should be rewritten
 		// to use processExpr.
-		_, err = findOrigin(filter, rb)
+		_, err = findRoute(filter, rb)
 		if err != nil {
 			return nil, err
 		}
@@ -214,15 +189,15 @@ func (rb *route) isSameRoute(rhs *route, filter sqlparser.Expr) bool {
 	}
 	left := comparison.Left
 	right := comparison.Right
-	lVindex := rb.Symtab().Vindex(left, rb)
+	lVindex := rb.Symtab().Vindex(left, rb, false)
 	if lVindex == nil {
 		left, right = right, left
-		lVindex = rb.Symtab().Vindex(left, rb)
+		lVindex = rb.Symtab().Vindex(left, rb, false)
 	}
 	if lVindex == nil || !vindexes.IsUnique(lVindex) {
 		return false
 	}
-	rVindex := rhs.Symtab().Vindex(right, rhs)
+	rVindex := rhs.Symtab().Vindex(right, rhs, false)
 	if rVindex == nil {
 		return false
 	}
@@ -232,9 +207,12 @@ func (rb *route) isSameRoute(rhs *route, filter sqlparser.Expr) bool {
 	return true
 }
 
-// PushFilter satisfies the builder interface.
-// The primitive will be updated if the new filter improves the plan.
-func (rb *route) PushFilter(filter sqlparser.Expr, whereType string, _ columnOriginator) error {
+// PushFilter pushes the filter into the route. The primitive will
+// be updated if the new filter improves it.
+func (rb *route) PushFilter(filter sqlparser.Expr, whereType string) error {
+	if rb.IsRHS {
+		return errors.New("unsupported: complex left join and where clause")
+	}
 	sel := rb.Select.(*sqlparser.Select)
 	switch whereType {
 	case sqlparser.WhereStr:
@@ -288,14 +266,14 @@ func (rb *route) UpdatePlan(filter sqlparser.Expr) {
 	}
 }
 
-func (rb *route) updateRoute(opcode engine.RouteOpcode, vindex vindexes.Vindex, condition sqlparser.Expr) {
+func (rb *route) updateRoute(opcode engine.RouteOpcode, vindex vindexes.Vindex, values interface{}) {
 	rb.ERoute.Opcode = opcode
 	rb.ERoute.Vindex = vindex
-	rb.condition = condition
+	rb.ERoute.Values = values
 }
 
-// computePlan computes the plan for the specified filter.
-func (rb *route) computePlan(filter sqlparser.Expr) (opcode engine.RouteOpcode, vindex vindexes.Vindex, condition sqlparser.Expr) {
+// ComputePlan computes the plan for the specified filter.
+func (rb *route) computePlan(filter sqlparser.Expr) (opcode engine.RouteOpcode, vindex vindexes.Vindex, values interface{}) {
 	switch node := filter.(type) {
 	case *sqlparser.ComparisonExpr:
 		switch node.Operator {
@@ -311,18 +289,18 @@ func (rb *route) computePlan(filter sqlparser.Expr) (opcode engine.RouteOpcode, 
 }
 
 // computeEqualPlan computes the plan for an equality constraint.
-func (rb *route) computeEqualPlan(comparison *sqlparser.ComparisonExpr) (opcode engine.RouteOpcode, vindex vindexes.Vindex, condition sqlparser.Expr) {
+func (rb *route) computeEqualPlan(comparison *sqlparser.ComparisonExpr) (opcode engine.RouteOpcode, vindex vindexes.Vindex, values interface{}) {
 	left := comparison.Left
 	right := comparison.Right
-	vindex = rb.Symtab().Vindex(left, rb)
+	vindex = rb.Symtab().Vindex(left, rb, true)
 	if vindex == nil {
 		left, right = right, left
-		vindex = rb.Symtab().Vindex(left, rb)
+		vindex = rb.Symtab().Vindex(left, rb, true)
 		if vindex == nil {
 			return engine.SelectScatter, nil, nil
 		}
 	}
-	if !rb.exprIsValue(right) {
+	if !exprIsValue(right, rb) {
 		return engine.SelectScatter, nil, nil
 	}
 	if vindexes.IsUnique(vindex) {
@@ -332,15 +310,15 @@ func (rb *route) computeEqualPlan(comparison *sqlparser.ComparisonExpr) (opcode 
 }
 
 // computeINPlan computes the plan for an IN constraint.
-func (rb *route) computeINPlan(comparison *sqlparser.ComparisonExpr) (opcode engine.RouteOpcode, vindex vindexes.Vindex, condition sqlparser.Expr) {
-	vindex = rb.Symtab().Vindex(comparison.Left, rb)
+func (rb *route) computeINPlan(comparison *sqlparser.ComparisonExpr) (opcode engine.RouteOpcode, vindex vindexes.Vindex, values interface{}) {
+	vindex = rb.Symtab().Vindex(comparison.Left, rb, true)
 	if vindex == nil {
 		return engine.SelectScatter, nil, nil
 	}
 	switch node := comparison.Right.(type) {
 	case sqlparser.ValTuple:
 		for _, n := range node {
-			if !rb.exprIsValue(n) {
+			if !exprIsValue(n, rb) {
 				return engine.SelectScatter, nil, nil
 			}
 		}
@@ -351,96 +329,61 @@ func (rb *route) computeINPlan(comparison *sqlparser.ComparisonExpr) (opcode eng
 	return engine.SelectScatter, nil, nil
 }
 
-// exprIsValue returns true if the expression can be treated as a value
-// for the route. External references are treated as value.
-func (rb *route) exprIsValue(expr sqlparser.Expr) bool {
-	if node, ok := expr.(*sqlparser.ColName); ok {
-		return node.Metadata.(*column).Origin() != rb
+// PushSelect pushes the select expression into the route.
+func (rb *route) PushSelect(expr *sqlparser.NonStarExpr, _ *route) (colsym *colsym, colnum int, err error) {
+	colsym = newColsym(rb, rb.Symtab())
+	colsym.Alias = expr.As
+	if col, ok := expr.Expr.(*sqlparser.ColName); ok {
+		// If no alias was specified, then the base name
+		// of the column becomes the alias.
+		if colsym.Alias.IsEmpty() {
+			colsym.Alias = col.Name
+		}
+		colsym.Vindex = rb.Symtab().Vindex(col, rb, true)
+		colsym.Underlying = newColref(col)
+	} else {
+		if rb.IsRHS {
+			return nil, 0, errors.New("unsupported: complex left join and column expressions")
+		}
+		// We should ideally generate an alias based on the
+		// expression, but we currently don't have the ability
+		// to reference such expressions. So, we leave the
+		// alias blank.
 	}
-	return sqlparser.IsValue(expr)
-}
-
-// PushSelect satisfies the builder interface.
-func (rb *route) PushSelect(expr *sqlparser.AliasedExpr, _ columnOriginator) (rc *resultColumn, colnum int, err error) {
 	sel := rb.Select.(*sqlparser.Select)
 	sel.SelectExprs = append(sel.SelectExprs, expr)
-
-	rc = rb.Symtab().NewResultColumn(expr, rb)
-	rb.resultColumns = append(rb.resultColumns, rc)
-
-	return rc, len(rb.resultColumns) - 1, nil
+	rb.Colsyms = append(rb.Colsyms, colsym)
+	return colsym, len(rb.Colsyms) - 1, nil
 }
 
-// PushAnonymous pushes an anonymous expression like '*' or NEXT VALUES
-// into the select expression list of the route. This function is
-// similar to PushSelect.
-func (rb *route) PushAnonymous(expr sqlparser.SelectExpr) *resultColumn {
-	sel := rb.Select.(*sqlparser.Select)
-	sel.SelectExprs = append(sel.SelectExprs, expr)
-
-	// We just create a place-holder resultColumn. It won't
+// PushStar pushes the '*' expression into the route.
+func (rb *route) PushStar(expr *sqlparser.StarExpr) *colsym {
+	// We just create a place-holder colsym. It won't
 	// match anything.
-	rc := &resultColumn{column: &column{origin: rb}}
-	rb.resultColumns = append(rb.resultColumns, rc)
-
-	return rc
+	colsym := newColsym(rb, rb.Symtab())
+	sel := rb.Select.(*sqlparser.Select)
+	sel.SelectExprs = append(sel.SelectExprs, expr)
+	rb.Colsyms = append(rb.Colsyms, colsym)
+	return colsym
 }
 
 // MakeDistinct sets the DISTINCT property to the select.
-func (rb *route) MakeDistinct() error {
+func (rb *route) MakeDistinct() {
 	rb.Select.(*sqlparser.Select).Distinct = sqlparser.DistinctStr
-	return nil
 }
 
 // SetGroupBy sets the GROUP BY clause for the route.
-func (rb *route) SetGroupBy(groupBy sqlparser.GroupBy) error {
+func (rb *route) SetGroupBy(groupBy sqlparser.GroupBy) {
 	rb.Select.(*sqlparser.Select).GroupBy = groupBy
-	return nil
 }
 
-// PushOrderBy sets the order by for the route.
-func (rb *route) PushOrderBy(order *sqlparser.Order) error {
-	if rb.IsSingle() {
-		rb.Select.AddOrder(order)
-		return nil
+// AddOrder adds an ORDER BY expression to the route.
+func (rb *route) AddOrder(order *sqlparser.Order) error {
+	if rb.IsRHS {
+		return errors.New("unsupported: complex left join and order by")
 	}
-
-	// If it's a scatter, we have to populate the OrderBy field.
-	colnum := -1
-	switch expr := order.Expr.(type) {
-	case *sqlparser.SQLVal:
-		var err error
-		if colnum, err = ResultFromNumber(rb.resultColumns, expr); err != nil {
-			return fmt.Errorf("invalid order by: %v", err)
-		}
-	case *sqlparser.ColName:
-		c := expr.Metadata.(*column)
-		for i, rc := range rb.resultColumns {
-			if rc.column == c {
-				colnum = i
-				break
-			}
-		}
-	default:
-		return fmt.Errorf("unsupported: in scatter query: complex order by expression: %s", sqlparser.String(expr))
-	}
-	// If column is not found, then the order by is referencing
-	// a column that's not on the select list.
-	if colnum == -1 {
-		return fmt.Errorf("unsupported: in scatter query: order by must reference a column in the select list: %s", sqlparser.String(order))
-	}
-	rb.ERoute.OrderBy = append(rb.ERoute.OrderBy, engine.OrderbyParams{
-		Col:  colnum,
-		Desc: order.Direction == sqlparser.DescScr,
-	})
-
 	rb.Select.AddOrder(order)
 	return nil
-}
-
-// PushOrderByNull satisfies the builder interface.
-func (rb *route) PushOrderByNull() {
-	rb.Select.(*sqlparser.Select).OrderBy = sqlparser.OrderBy{&sqlparser.Order{Expr: &sqlparser.NullVal{}}}
 }
 
 // SetLimit adds a LIMIT clause to the route.
@@ -448,42 +391,34 @@ func (rb *route) SetLimit(limit *sqlparser.Limit) {
 	rb.Select.SetLimit(limit)
 }
 
-// SetUpperLimit satisfies the builder interface.
-// The route pushes the limit regardless of the plan.
-// If it's a scatter query, the rows returned will be
-// more than the upper limit, but enough for the limit
-// primitive to chop off where needed.
-func (rb *route) SetUpperLimit(count *sqlparser.SQLVal) {
-	rb.Select.SetLimit(&sqlparser.Limit{Rowcount: count})
+// PushOrderByNull updates the comments & 'for update' sections of the route.
+func (rb *route) PushOrderByNull() {
+	rb.Select.(*sqlparser.Select).OrderBy = sqlparser.OrderBy{&sqlparser.Order{Expr: &sqlparser.NullVal{}}}
 }
 
-// PushMisc satisfies the builder interface.
+// PushMisc updates the comments & 'for update' sections of the route.
 func (rb *route) PushMisc(sel *sqlparser.Select) {
 	rb.Select.(*sqlparser.Select).Comments = sel.Comments
 	rb.Select.(*sqlparser.Select).Lock = sel.Lock
 }
 
-// Wireup satisfies the builder interface.
+// Wireup performs the wire-up tasks.
 func (rb *route) Wireup(bldr builder, jt *jointab) error {
-	// Precaution: update ERoute.Values only if it's not set already.
-	if rb.ERoute.Values == nil {
-		// Resolve values stored in the builder.
-		switch vals := rb.condition.(type) {
-		case *sqlparser.ComparisonExpr:
-			pv, err := rb.procureValues(bldr, jt, vals.Right)
-			if err != nil {
-				return err
-			}
-			rb.ERoute.Values = []sqltypes.PlanValue{pv}
-			vals.Right = sqlparser.ListArg("::" + engine.ListVarName)
-		case nil:
-			// no-op.
-		default:
-			pv, err := rb.procureValues(bldr, jt, vals)
-			if err != nil {
-				return err
-			}
-			rb.ERoute.Values = []sqltypes.PlanValue{pv}
+	// Resolve values stored in the builder.
+	var err error
+	switch vals := rb.ERoute.Values.(type) {
+	case *sqlparser.ComparisonExpr:
+		// A comparison expression is stored only if it was an IN clause.
+		// We have to convert it to use a list argutment and resolve values.
+		rb.ERoute.Values, err = rb.procureValues(bldr, jt, vals.Right)
+		if err != nil {
+			return err
+		}
+		vals.Right = sqlparser.ListArg("::" + engine.ListVarName)
+	default:
+		rb.ERoute.Values, err = rb.procureValues(bldr, jt, vals)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -493,14 +428,14 @@ func (rb *route) Wireup(bldr builder, jt *jointab) error {
 		case *sqlparser.Select:
 			if len(node.SelectExprs) == 0 {
 				node.SelectExprs = sqlparser.SelectExprs([]sqlparser.SelectExpr{
-					&sqlparser.AliasedExpr{
+					&sqlparser.NonStarExpr{
 						Expr: sqlparser.NewIntVal([]byte{'1'}),
 					},
 				})
 			}
 		case *sqlparser.ComparisonExpr:
 			if node.Operator == sqlparser.EqualStr {
-				if rb.exprIsValue(node.Left) && !rb.exprIsValue(node.Right) {
+				if exprIsValue(node.Left, rb) && !exprIsValue(node.Right, rb) {
 					node.Left, node.Right = node.Right, node.Left
 				}
 			}
@@ -518,12 +453,8 @@ func (rb *route) Wireup(bldr builder, jt *jointab) error {
 				buf.Myprintf("%a", ":"+joinVar)
 				return
 			}
-		case sqlparser.TableName:
-			if !systemTable(node.Qualifier.String()) {
-				node.Name.Format(buf)
-				return
-			}
-			node.Format(buf)
+		case *sqlparser.TableName:
+			node.Name.Format(buf)
 			return
 		}
 		node.Format(buf)
@@ -535,38 +466,36 @@ func (rb *route) Wireup(bldr builder, jt *jointab) error {
 	return nil
 }
 
-func systemTable(qualifier string) bool {
-	return strings.EqualFold(qualifier, "information_schema") ||
-		strings.EqualFold(qualifier, "performance_schema") ||
-		strings.EqualFold(qualifier, "sys") ||
-		strings.EqualFold(qualifier, "mysql")
-}
-
 // procureValues procures and converts the input into
 // the expected types for rb.Values.
-func (rb *route) procureValues(bldr builder, jt *jointab, val sqlparser.Expr) (sqltypes.PlanValue, error) {
+func (rb *route) procureValues(bldr builder, jt *jointab, val interface{}) (interface{}, error) {
 	switch val := val.(type) {
+	case nil:
+		return nil, nil
 	case sqlparser.ValTuple:
-		pv := sqltypes.PlanValue{}
+		vals := make([]interface{}, 0, len(val))
 		for _, val := range val {
 			v, err := rb.procureValues(bldr, jt, val)
 			if err != nil {
-				return pv, err
+				return nil, err
 			}
-			pv.Values = append(pv.Values, v)
+			vals = append(vals, v)
 		}
-		return pv, nil
+		return vals, nil
 	case *sqlparser.ColName:
 		joinVar := jt.Procure(bldr, val, rb.Order())
 		rb.ERoute.JoinVars[joinVar] = struct{}{}
-		return sqltypes.PlanValue{Key: joinVar}, nil
-	default:
-		return sqlparser.NewPlanValue(val)
+		return ":" + joinVar, nil
+	case sqlparser.ListArg:
+		return string(val), nil
+	case sqlparser.Expr:
+		return valConvert(val)
 	}
+	panic("unrecognized symbol")
 }
 
 func (rb *route) isLocal(col *sqlparser.ColName) bool {
-	return col.Metadata.(*column).Origin() == rb
+	return col.Metadata.(sym).Route() == rb
 }
 
 // generateFieldQuery generates a query with an impossible where.
@@ -581,12 +510,8 @@ func (rb *route) generateFieldQuery(sel sqlparser.SelectStatement, jt *jointab) 
 				buf.Myprintf("%a", ":"+joinVar)
 				return
 			}
-		case sqlparser.TableName:
-			if !systemTable(node.Qualifier.String()) {
-				node.Name.Format(buf)
-				return
-			}
-			node.Format(buf)
+		case *sqlparser.TableName:
+			node.Name.Format(buf)
 			return
 		}
 		sqlparser.FormatImpossibleQuery(buf, node)
@@ -595,151 +520,36 @@ func (rb *route) generateFieldQuery(sel sqlparser.SelectStatement, jt *jointab) 
 	return sqlparser.NewTrackedBuffer(formatter).WriteNode(sel).ParsedQuery().Query
 }
 
-// SupplyVar satisfies the builder interface.
+// SupplyVar should be unreachable.
 func (rb *route) SupplyVar(from, to int, col *sqlparser.ColName, varname string) {
-	// route is an atomic primitive. So, SupplyVar cannot be
-	// called on it.
-	panic("BUG: route is an atomic node.")
+	panic("unreachable")
 }
 
-// SupplyCol satisfies the builder interface.
-func (rb *route) SupplyCol(col *sqlparser.ColName) (rc *resultColumn, colnum int) {
-	c := col.Metadata.(*column)
-	for i, rc := range rb.resultColumns {
-		if rc.column == c {
-			return rc, i
+// SupplyCol changes the router to supply the requested column
+// name, and returns the result column number. If the column
+// is already in the list, it's reused.
+func (rb *route) SupplyCol(ref colref) int {
+	for i, colsym := range rb.Colsyms {
+		if colsym.Underlying == ref {
+			return i
 		}
 	}
-
-	// A new result has to be returned.
-	rc = &resultColumn{column: c}
-	rb.resultColumns = append(rb.resultColumns, rc)
+	rb.Colsyms = append(rb.Colsyms, &colsym{Underlying: ref})
 	sel := rb.Select.(*sqlparser.Select)
-	sel.SelectExprs = append(sel.SelectExprs, &sqlparser.AliasedExpr{Expr: col})
-	return rc, len(rb.resultColumns) - 1
-}
-
-// BuildColName builds a *sqlparser.ColName for the resultColumn specified
-// by the index. The built ColName will correctly reference the resultColumn
-// it was built from, which is safe to push down into the route.
-func (rb *route) BuildColName(index int) (*sqlparser.ColName, error) {
-	alias := rb.resultColumns[index].alias
-	if alias.IsEmpty() {
-		return nil, errors.New("cannot reference a complex expression")
-	}
-	for i, rc := range rb.resultColumns {
-		if i == index {
-			continue
-		}
-		if rc.alias.Equal(alias) {
-			return nil, fmt.Errorf("ambiguous symbol reference: %v", alias)
-		}
-	}
-	return &sqlparser.ColName{
-		Metadata: rb.resultColumns[index].column,
-		Name:     alias,
-	}, nil
+	sel.SelectExprs = append(
+		sel.SelectExprs,
+		&sqlparser.NonStarExpr{
+			Expr: &sqlparser.ColName{
+				Metadata:  ref.Meta,
+				Qualifier: &sqlparser.TableName{Name: ref.Meta.(*tabsym).ASTName},
+				Name:      ref.Name(),
+			},
+		},
+	)
+	return len(rb.Colsyms) - 1
 }
 
 // IsSingle returns true if the route targets only one database.
 func (rb *route) IsSingle() bool {
-	switch rb.ERoute.Opcode {
-	// Even thought SelectNext is a single-shard query, we don't
-	// include it here because it can't be combined with any other construct.
-	case engine.SelectUnsharded, engine.ExecDBA, engine.SelectEqualUnique:
-		return true
-	}
-	return false
-}
-
-// SubqueryCanMerge returns nil if the supplied route that represents
-// a subquery can be merged with the outer route. If not, it
-// returns an appropriate error.
-func (rb *route) SubqueryCanMerge(inner *route) error {
-	if rb.ERoute.Keyspace.Name != inner.ERoute.Keyspace.Name {
-		return errors.New("unsupported: subquery keyspace different from outer query")
-	}
-	switch inner.ERoute.Opcode {
-	case engine.SelectUnsharded:
-		if rb.ERoute.Opcode == engine.SelectUnsharded {
-			return nil
-		}
-		return errIntermixingUnsupported
-	case engine.ExecDBA:
-		if rb.ERoute.Opcode == engine.ExecDBA {
-			return nil
-		}
-		return errIntermixingUnsupported
-	case engine.SelectNext:
-		return errors.New("unsupported: use of sequence in subquery")
-	case engine.SelectEqualUnique:
-		// This checks for the case where the subquery is dependent
-		// on the vindex column of the outer query:
-		// select ... from a where a.id = 5 ... (select ... from b where b.id = a.id).
-		// If b.id and a.id have the same vindex, it becomes a single-shard
-		// query: the subquery can merge with the outer query.
-		switch vals := inner.condition.(type) {
-		case *sqlparser.ColName:
-			if rb.Symtab().Vindex(vals, rb) == inner.ERoute.Vindex {
-				return nil
-			}
-		}
-	default:
-		return errors.New("unsupported: scatter subquery")
-	}
-
-	if rb.ERoute.Opcode != engine.SelectEqualUnique {
-		return errors.New("unsupported: subquery does not depend on scatter outer query")
-	}
-	if !valEqual(rb.condition, inner.condition) {
-		return errors.New("unsupported: subquery and parent route to different shards")
-	}
-	return nil
-}
-
-// UnionCanMerge returns nil if the supplied route that represents
-// the RHS of a union can be merged with the current route. If not, it
-// returns an appropriate error.
-func (rb *route) UnionCanMerge(right *route) error {
-	if rb.ERoute.Opcode == engine.SelectNext || right.ERoute.Opcode == engine.SelectNext {
-		return errors.New("unsupported: UNION on sequence tables")
-	}
-	if rb.ERoute.Keyspace.Name != right.ERoute.Keyspace.Name {
-		return errors.New("unsupported: UNION on different keyspaces")
-	}
-	switch rb.ERoute.Opcode {
-	case engine.SelectUnsharded:
-		if right.ERoute.Opcode == engine.SelectUnsharded {
-			return nil
-		}
-		return errIntermixingUnsupported
-	case engine.ExecDBA:
-		if right.ERoute.Opcode == engine.ExecDBA {
-			return nil
-		}
-		return errIntermixingUnsupported
-	}
-
-	if rb.ERoute.Opcode != engine.SelectEqualUnique || right.ERoute.Opcode != engine.SelectEqualUnique {
-		return errors.New("unsupported: UNION on multi-shard queries")
-	}
-	if !valEqual(rb.condition, right.condition) {
-		return errors.New("unsupported: UNION queries with different target shards")
-	}
-	return nil
-}
-
-// SetOpcode changes the opcode to the specified value.
-// If the change is not allowed, it returns an error.
-func (rb *route) SetOpcode(code engine.RouteOpcode) error {
-	switch code {
-	case engine.SelectNext:
-		if rb.ERoute.Opcode != engine.SelectUnsharded {
-			return errors.New("NEXT used on a sharded table")
-		}
-	default:
-		panic(fmt.Sprintf("BUG: unrecognized transition: %v", code))
-	}
-	rb.ERoute.Opcode = code
-	return nil
+	return rb.ERoute.Opcode == engine.SelectUnsharded || rb.ERoute.Opcode == engine.SelectEqualUnique
 }

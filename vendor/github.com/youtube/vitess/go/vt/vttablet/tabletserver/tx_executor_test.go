@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletserver
 
@@ -20,28 +8,27 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"golang.org/x/net/context"
 
-	"github.com/youtube/vitess/go/mysql/fakesqldb"
+	"github.com/youtube/vitess/go/mysqlconn/fakesqldb"
 	"github.com/youtube/vitess/go/sqltypes"
-	"github.com/youtube/vitess/go/vt/vtgate/fakerpcvtgateconn"
-	"github.com/youtube/vitess/go/vt/vtgate/vtgateconn"
-	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
-
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
+	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
+	"github.com/youtube/vitess/go/vt/vtgate/fakerpcvtgateconn"
+	"github.com/youtube/vitess/go/vt/vtgate/vtgateconn"
 )
 
 func TestTxExecutorEmptyPrepare(t *testing.T) {
 	txe, tsv, db := newTestTxExecutor(t)
 	defer db.Close()
 	defer tsv.StopService()
-	txid := newTransaction(tsv, nil)
+	txid := newTransaction(tsv)
 	err := txe.Prepare(txid, "aa")
 	if err != nil {
 		t.Error(err)
@@ -330,7 +317,7 @@ func TestExecutorReadTransaction(t *testing.T) {
 		t.Error(err)
 	}
 	want := &querypb.TransactionMetadata{}
-	if !proto.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ReadTransaction: %v, want %v", got, want)
 	}
 
@@ -341,9 +328,9 @@ func TestExecutorReadTransaction(t *testing.T) {
 			{Type: sqltypes.Int64},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("aa"),
-			sqltypes.NewInt64(int64(querypb.TransactionState_PREPARE)),
-			sqltypes.NewVarBinary("1"),
+			sqltypes.MakeString([]byte("aa")),
+			sqltypes.MakeString([]byte(strconv.Itoa(int(querypb.TransactionState_PREPARE)))),
+			sqltypes.MakeString([]byte("1")),
 		}},
 	}
 	db.AddQuery("select dtid, state, time_created from `_vt`.dt_state where dtid = 'aa'", txResult)
@@ -353,11 +340,11 @@ func TestExecutorReadTransaction(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("test1"),
-			sqltypes.NewVarBinary("0"),
+			sqltypes.MakeString([]byte("test1")),
+			sqltypes.MakeString([]byte("0")),
 		}, {
-			sqltypes.NewVarBinary("test2"),
-			sqltypes.NewVarBinary("1"),
+			sqltypes.MakeString([]byte("test2")),
+			sqltypes.MakeString([]byte("1")),
 		}},
 	})
 	got, err = txe.ReadTransaction("aa")
@@ -378,7 +365,7 @@ func TestExecutorReadTransaction(t *testing.T) {
 			TabletType: topodatapb.TabletType_MASTER,
 		}},
 	}
-	if !proto.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ReadTransaction: %v, want %v", got, want)
 	}
 
@@ -389,9 +376,9 @@ func TestExecutorReadTransaction(t *testing.T) {
 			{Type: sqltypes.Int64},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("aa"),
-			sqltypes.NewInt64(int64(querypb.TransactionState_COMMIT)),
-			sqltypes.NewVarBinary("1"),
+			sqltypes.MakeString([]byte("aa")),
+			sqltypes.MakeString([]byte(strconv.Itoa(int(querypb.TransactionState_COMMIT)))),
+			sqltypes.MakeString([]byte("1")),
 		}},
 	}
 	db.AddQuery("select dtid, state, time_created from `_vt`.dt_state where dtid = 'aa'", txResult)
@@ -400,7 +387,7 @@ func TestExecutorReadTransaction(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if !proto.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ReadTransaction: %v, want %v", got, want)
 	}
 
@@ -411,9 +398,9 @@ func TestExecutorReadTransaction(t *testing.T) {
 			{Type: sqltypes.Int64},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("aa"),
-			sqltypes.NewInt64(int64(querypb.TransactionState_ROLLBACK)),
-			sqltypes.NewVarBinary("1"),
+			sqltypes.MakeString([]byte("aa")),
+			sqltypes.MakeString([]byte(strconv.Itoa(int(querypb.TransactionState_ROLLBACK)))),
+			sqltypes.MakeString([]byte("1")),
 		}},
 	}
 	db.AddQuery("select dtid, state, time_created from `_vt`.dt_state where dtid = 'aa'", txResult)
@@ -422,7 +409,7 @@ func TestExecutorReadTransaction(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if !proto.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ReadTransaction: %v, want %v", got, want)
 	}
 }
@@ -441,11 +428,11 @@ func TestExecutorReadAllTransactions(t *testing.T) {
 			{Type: sqltypes.VarChar},
 		},
 		Rows: [][]sqltypes.Value{{
-			sqltypes.NewVarBinary("dtid0"),
-			sqltypes.NewInt64(int64(querypb.TransactionState_PREPARE)),
-			sqltypes.NewVarBinary("1"),
-			sqltypes.NewVarBinary("ks01"),
-			sqltypes.NewVarBinary("shard01"),
+			sqltypes.MakeString([]byte("dtid0")),
+			sqltypes.MakeString([]byte(strconv.Itoa(int(querypb.TransactionState_PREPARE)))),
+			sqltypes.MakeString([]byte("1")),
+			sqltypes.MakeString([]byte("ks01")),
+			sqltypes.MakeString([]byte("shard01")),
 		}},
 	})
 	got, _, _, err := txe.ReadTwopcInflight()
@@ -501,8 +488,8 @@ func TestExecutorResolveTransaction(t *testing.T) {
 				{Type: sqltypes.Int64},
 			},
 			Rows: [][]sqltypes.Value{{
-				sqltypes.NewVarBinary(want),
-				sqltypes.NewVarBinary("1"),
+				sqltypes.MakeString([]byte(want)),
+				sqltypes.MakeString([]byte("1")),
 			}},
 		})
 	got := <-dtidCh
@@ -616,7 +603,7 @@ func newNoTwopcExecutor(t *testing.T) (txe *TxExecutor, tsv *TabletServer, db *f
 
 // newTxForPrep creates a non-empty transaction.
 func newTxForPrep(tsv *TabletServer) int64 {
-	txid := newTransaction(tsv, nil)
+	txid := newTransaction(tsv)
 	target := querypb.Target{TabletType: topodatapb.TabletType_MASTER}
 	_, err := tsv.Execute(context.Background(), &target, "update test_table set name = 2 where pk = 1", nil, txid, nil)
 	if err != nil {

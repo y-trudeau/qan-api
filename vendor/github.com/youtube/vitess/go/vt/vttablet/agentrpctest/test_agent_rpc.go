@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package agentrpctest
 
@@ -27,7 +15,6 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/hook"
 	"github.com/youtube/vitess/go/vt/logutil"
@@ -72,36 +59,10 @@ func NewFakeRPCAgent(t *testing.T) tabletmanager.RPCAgent {
 // for each possible method of the interface.
 // This makes the implementations all in the same spot.
 
-var protoMessage = reflect.TypeOf((*proto.Message)(nil)).Elem()
-
 func compare(t *testing.T, name string, got, want interface{}) {
-	typ := reflect.TypeOf(got)
-	if reflect.TypeOf(got) != reflect.TypeOf(want) {
-		goto fail
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Unexpected %v: got %v expected %v", name, got, want)
 	}
-	switch {
-	case typ.Implements(protoMessage):
-		if !proto.Equal(got.(proto.Message), want.(proto.Message)) {
-			goto fail
-		}
-	case typ.Kind() == reflect.Slice && typ.Elem().Implements(protoMessage):
-		vx, vy := reflect.ValueOf(got), reflect.ValueOf(want)
-		if vx.Len() != vy.Len() {
-			goto fail
-		}
-		for i := 0; i < vx.Len(); i++ {
-			if !proto.Equal(vx.Index(i).Interface().(proto.Message), vy.Index(i).Interface().(proto.Message)) {
-				goto fail
-			}
-		}
-	default:
-		if !reflect.DeepEqual(got, want) {
-			goto fail
-		}
-	}
-	return
-fail:
-	t.Errorf("Unexpected %v:\ngot  %#v\nwant %#v", name, got, want)
 }
 
 func compareBool(t *testing.T, name string, got bool) {
@@ -566,9 +527,7 @@ func (fra *fakeRPCAgent) ApplySchema(ctx context.Context, change *tmutils.Schema
 	if fra.panics {
 		panic(fmt.Errorf("test-triggered panic"))
 	}
-	if !change.Equal(testSchemaChange) {
-		fra.t.Errorf("Unexpected ApplySchema change:\ngot  %#v\nwant %#v", change, testSchemaChange)
-	}
+	compare(fra.t, "ApplySchema change", change, testSchemaChange)
 	return testSchemaChangeResult[0], nil
 }
 

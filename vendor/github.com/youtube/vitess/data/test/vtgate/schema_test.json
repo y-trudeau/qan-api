@@ -90,8 +90,6 @@
     "main": {
       "tables": {
         "unsharded": {},
-        "unsharded_a": {},
-        "unsharded_b": {},
         "unsharded_auto": {
           "auto_increment": {
             "column": "id",

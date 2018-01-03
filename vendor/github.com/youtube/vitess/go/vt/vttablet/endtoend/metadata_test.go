@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package endtoend
 
 import (
@@ -31,9 +15,9 @@ func getAndSetup(t *testing.T) *framework.QueryClient {
 
 	_, err := client.Execute(
 		"insert into vitess_b values(:eid, :id)",
-		map[string]*querypb.BindVariable{
-			"id":  sqltypes.Int64BindVariable(-2147483648),
-			"eid": sqltypes.Int64BindVariable(-9223372036854775808),
+		map[string]interface{}{
+			"id":  int64(-2147483648),
+			"eid": int64(-9223372036854775808),
 		},
 	)
 	if err != nil {
@@ -94,8 +78,8 @@ func TestMetadataSpecificExecOptions(t *testing.T) {
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
 			{
-				sqltypes.NewInt64(-9223372036854775808),
-				sqltypes.NewInt32(-2147483648),
+				sqltypes.MakeTrusted(sqltypes.Int64, []byte("-9223372036854775808")),
+				sqltypes.MakeTrusted(sqltypes.Int32, []byte("-2147483648")),
 			},
 		},
 	}
@@ -135,8 +119,8 @@ func TestMetadataDefaultExecOptions(t *testing.T) {
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
 			{
-				sqltypes.NewInt64(-9223372036854775808),
-				sqltypes.NewInt32(-2147483648),
+				sqltypes.MakeTrusted(sqltypes.Int64, []byte("-9223372036854775808")),
+				sqltypes.MakeTrusted(sqltypes.Int32, []byte("-2147483648")),
 			},
 		},
 	}
@@ -176,8 +160,8 @@ func TestMetadataNoExecOptions(t *testing.T) {
 		RowsAffected: 1,
 		Rows: [][]sqltypes.Value{
 			{
-				sqltypes.NewInt64(-9223372036854775808),
-				sqltypes.NewInt32(-2147483648),
+				sqltypes.MakeTrusted(sqltypes.Int64, []byte("-9223372036854775808")),
+				sqltypes.MakeTrusted(sqltypes.Int32, []byte("-2147483648")),
 			},
 		},
 	}

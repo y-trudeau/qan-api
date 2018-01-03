@@ -1,32 +1,28 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"golang.org/x/net/context"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/youtube/vitess/go/vt/key"
 	"github.com/youtube/vitess/go/vt/topo"
 
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 )
+
+func shardEqual(left, right *topodatapb.Shard) (bool, error) {
+	lj, err := json.Marshal(left)
+	if err != nil {
+		return false, err
+	}
+	rj, err := json.Marshal(right)
+	if err != nil {
+		return false, err
+	}
+	return string(lj) == string(rj), nil
+}
 
 // checkShard verifies the Shard operations work correctly
 func checkShard(t *testing.T, ts topo.Impl) {
@@ -127,7 +123,7 @@ func checkShard(t *testing.T, ts topo.Impl) {
 	if err != nil {
 		t.Fatalf("GetShard: %v", err)
 	}
-	if !proto.Equal(s.MasterAlias, other) {
+	if *s.MasterAlias != *other {
 		t.Fatalf("shard.MasterAlias = %v, want %v", s.MasterAlias, other)
 	}
 
@@ -142,7 +138,9 @@ func checkShard(t *testing.T, ts topo.Impl) {
 		t.Fatalf("GetShard: %v", err)
 	}
 
-	if !proto.Equal(shard, updatedShard) {
+	if eq, err := shardEqual(shard, updatedShard); err != nil {
+		t.Errorf("cannot compare shards: %v", err)
+	} else if !eq {
 		t.Errorf("put and got shards are not identical:\n%#v\n%#v", shard, updatedShard)
 	}
 

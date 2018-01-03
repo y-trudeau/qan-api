@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package binlogplayertest
 
@@ -23,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"golang.org/x/net/context"
 
 	"github.com/youtube/vitess/go/vt/binlog/binlogplayer"
@@ -107,9 +94,7 @@ func (fake *FakeBinlogStreamer) StreamKeyRange(ctx context.Context, position str
 		KeyRange: keyRange,
 		Charset:  charset,
 	}
-	if position != testKeyRangeRequest.Position ||
-		!proto.Equal(keyRange, testKeyRangeRequest.KeyRange) ||
-		!proto.Equal(charset, testKeyRangeRequest.Charset) {
+	if !reflect.DeepEqual(req, testKeyRangeRequest) {
 		fake.t.Errorf("wrong StreamKeyRange parameter, got %+v want %+v", req, testKeyRangeRequest)
 	}
 	callback(testBinlogTransaction)
@@ -125,7 +110,7 @@ func testStreamKeyRange(t *testing.T, bpc binlogplayer.Client) {
 	if se, err := stream.Recv(); err != nil {
 		t.Fatalf("got error: %v", err)
 	} else {
-		if !proto.Equal(se, testBinlogTransaction) {
+		if !reflect.DeepEqual(*se, *testBinlogTransaction) {
 			t.Errorf("got wrong result, got %v expected %v", *se, *testBinlogTransaction)
 		}
 	}
@@ -173,9 +158,7 @@ func (fake *FakeBinlogStreamer) StreamTables(ctx context.Context, position strin
 		Tables:   tables,
 		Charset:  charset,
 	}
-	if position != testTablesRequest.Position ||
-		!reflect.DeepEqual(tables, testTablesRequest.Tables) ||
-		!proto.Equal(charset, testTablesRequest.Charset) {
+	if !reflect.DeepEqual(req, testTablesRequest) {
 		fake.t.Errorf("wrong StreamTables parameter, got %+v want %+v", req, testTablesRequest)
 	}
 	callback(testBinlogTransaction)
@@ -191,7 +174,7 @@ func testStreamTables(t *testing.T, bpc binlogplayer.Client) {
 	if se, err := stream.Recv(); err != nil {
 		t.Fatalf("got error: %v", err)
 	} else {
-		if !proto.Equal(se, testBinlogTransaction) {
+		if !reflect.DeepEqual(*se, *testBinlogTransaction) {
 			t.Errorf("got wrong result, got %v expected %v", *se, *testBinlogTransaction)
 		}
 	}

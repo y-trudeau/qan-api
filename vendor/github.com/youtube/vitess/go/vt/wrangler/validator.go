@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package wrangler
 
@@ -137,7 +125,7 @@ func (wr *Wrangler) validateShard(ctx context.Context, keyspace, shard string, p
 
 	var masterAlias *topodatapb.TabletAlias
 	for _, alias := range aliases {
-		tabletInfo, ok := tabletMap[topoproto.TabletAliasString(alias)]
+		tabletInfo, ok := tabletMap[*alias]
 		if !ok {
 			results <- fmt.Errorf("tablet %v not found in map", topoproto.TabletAliasString(alias))
 			continue
@@ -187,16 +175,15 @@ func normalizeIP(ip string) string {
 	return ip
 }
 
-func (wr *Wrangler) validateReplication(ctx context.Context, shardInfo *topo.ShardInfo, tabletMap map[string]*topo.TabletInfo, results chan<- error) {
+func (wr *Wrangler) validateReplication(ctx context.Context, shardInfo *topo.ShardInfo, tabletMap map[topodatapb.TabletAlias]*topo.TabletInfo, results chan<- error) {
 	if shardInfo.MasterAlias == nil {
 		results <- fmt.Errorf("no master in shard record %v/%v", shardInfo.Keyspace(), shardInfo.ShardName())
 		return
 	}
 
-	shardInfoMasterAliasStr := topoproto.TabletAliasString(shardInfo.MasterAlias)
-	masterTabletInfo, ok := tabletMap[shardInfoMasterAliasStr]
+	masterTabletInfo, ok := tabletMap[*shardInfo.MasterAlias]
 	if !ok {
-		results <- fmt.Errorf("master %v not in tablet map", shardInfoMasterAliasStr)
+		results <- fmt.Errorf("master %v not in tablet map", topoproto.TabletAliasString(shardInfo.MasterAlias))
 		return
 	}
 
@@ -206,19 +193,14 @@ func (wr *Wrangler) validateReplication(ctx context.Context, shardInfo *topo.Sha
 		return
 	}
 	if len(slaveList) == 0 {
-		results <- fmt.Errorf("no slaves of tablet %v found", shardInfoMasterAliasStr)
+		results <- fmt.Errorf("no slaves of tablet %v found", topoproto.TabletAliasString(shardInfo.MasterAlias))
 		return
 	}
 
 	tabletIPMap := make(map[string]*topodatapb.Tablet)
 	slaveIPMap := make(map[string]bool)
 	for _, tablet := range tabletMap {
-		ip, err := topoproto.MySQLIP(tablet.Tablet)
-		if err != nil {
-			results <- fmt.Errorf("could not resolve IP for tablet %s: %v", topoproto.MysqlHostname(tablet.Tablet), err)
-			continue
-		}
-		tabletIPMap[normalizeIP(ip)] = tablet.Tablet
+		tabletIPMap[normalizeIP(tablet.Ip)] = tablet.Tablet
 	}
 
 	// See if every slave is in the replication graph.
@@ -235,25 +217,20 @@ func (wr *Wrangler) validateReplication(ctx context.Context, shardInfo *topo.Sha
 			continue
 		}
 
-		ip, err := topoproto.MySQLIP(tablet.Tablet)
-		if err != nil {
-			results <- fmt.Errorf("could not resolve IP for tablet %s: %v", topoproto.MysqlHostname(tablet.Tablet), err)
-			continue
-		}
-		if !slaveIPMap[normalizeIP(ip)] {
-			results <- fmt.Errorf("slave %v not replicating: %v slave list: %q", topoproto.TabletAliasString(tablet.Alias), ip, slaveList)
+		if !slaveIPMap[normalizeIP(tablet.Ip)] {
+			results <- fmt.Errorf("slave %v not replicating: %v slave list: %q", topoproto.TabletAliasString(tablet.Alias), tablet.Ip, slaveList)
 		}
 	}
 }
 
-func (wr *Wrangler) pingTablets(ctx context.Context, tabletMap map[string]*topo.TabletInfo, wg *sync.WaitGroup, results chan<- error) {
+func (wr *Wrangler) pingTablets(ctx context.Context, tabletMap map[topodatapb.TabletAlias]*topo.TabletInfo, wg *sync.WaitGroup, results chan<- error) {
 	for tabletAlias, tabletInfo := range tabletMap {
 		wg.Add(1)
-		go func(tabletAlias string, tabletInfo *topo.TabletInfo) {
+		go func(tabletAlias topodatapb.TabletAlias, tabletInfo *topo.TabletInfo) {
 			defer wg.Done()
 
 			if err := wr.tmc.Ping(ctx, tabletInfo.Tablet); err != nil {
-				results <- fmt.Errorf("Ping(%v) failed: %v tablet hostname: %v", tabletAlias, err, tabletInfo.Hostname)
+				results <- fmt.Errorf("Ping(%v) failed: %v tablet hostname: %v", topoproto.TabletAliasString(&tabletAlias), err, tabletInfo.Hostname)
 			}
 		}(tabletAlias, tabletInfo)
 	}

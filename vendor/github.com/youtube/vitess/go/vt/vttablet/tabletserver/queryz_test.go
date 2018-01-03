@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletserver
 
@@ -27,8 +15,8 @@ import (
 	"time"
 
 	"github.com/youtube/vitess/go/vt/sqlparser"
-	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/planbuilder"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
+	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/planbuilder"
 )
 
 func TestQueryzHandler(t *testing.T) {
@@ -59,7 +47,7 @@ func TestQueryzHandler(t *testing.T) {
 	plan3 := &TabletPlan{
 		Plan: &planbuilder.Plan{
 			Table:  &schema.Table{Name: sqlparser.NewTableIdent("")},
-			PlanID: planbuilder.PlanOtherRead,
+			PlanID: planbuilder.PlanOther,
 			Reason: planbuilder.ReasonDefault,
 		},
 	}
@@ -70,14 +58,14 @@ func TestQueryzHandler(t *testing.T) {
 	plan4 := &TabletPlan{
 		Plan: &planbuilder.Plan{
 			Table:  &schema.Table{Name: sqlparser.NewTableIdent("")},
-			PlanID: planbuilder.PlanOtherRead,
+			PlanID: planbuilder.PlanOther,
 			Reason: planbuilder.ReasonDefault,
 		},
 	}
 	plan4.AddStats(1, 1*time.Millisecond, 1*time.Millisecond, 1, 0)
-	hugeInsert := "insert into test_table values 0"
+	hugeInsert := "insert into test_table values 0";
 	for i := 1; i < 1000; i++ {
-		hugeInsert = hugeInsert + fmt.Sprintf(", %d", i)
+		hugeInsert = hugeInsert + fmt.Sprintf(", %d", i);
 	}
 	qe.queries.Set(hugeInsert, plan4)
 	qe.queries.Set("", (*TabletPlan)(nil))
@@ -122,7 +110,7 @@ func TestQueryzHandler(t *testing.T) {
 		`<tr class="medium">`,
 		`<td>show tables</td>`,
 		`<td></td>`,
-		`<td>OTHER_READ</td>`,
+		`<td>OTHER</td>`,
 		`<td>DEFAULT</td>`,
 		`<td>1</td>`,
 		`<td>0.075000</td>`,
@@ -139,7 +127,7 @@ func TestQueryzHandler(t *testing.T) {
 		`<tr class="low">`,
 		`<td>insert into test_table values .* \[TRUNCATED\][^<]*</td>`,
 		`<td></td>`,
-		`<td>OTHER_READ</td>`,
+		`<td>OTHER</td>`,
 		`<td>DEFAULT</td>`,
 		`<td>1</td>`,
 		`<td>0.001000</td>`,

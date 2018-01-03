@@ -1,20 +1,8 @@
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // +build go1.8
-
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 
 // TODO(sougou): Merge this with driver.go once go1.7 is deprecated.
 // Also write tests for these new functions once go1.8 becomes mainstream.
@@ -25,6 +13,9 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
+	"fmt"
+
+	"github.com/youtube/vitess/go/vt/vtgate/vtgateconn"
 )
 
 var (
@@ -40,13 +31,41 @@ var (
 	_ driver.StmtExecContext  = &stmt{}
 )
 
-func (c *conn) BeginTx(_ context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	// We don't use the context. The function signature accepts the context
-	// to signal to the driver that it's allowed to call Rollback on Cancel.
+// These are synonyms of the constants defined in vtgateconn.
+const (
+	// AtomicityMulti is the default level. It allows distributed transactions
+	// with best effort commits. Partial commits are possible.
+	AtomicityMulti = vtgateconn.AtomicityMulti
+	// AtomicitySingle prevents a transaction from crossing the boundary of
+	// a single database.
+	AtomicitySingle = vtgateconn.AtomicitySingle
+	// Atomicity2PC allows distributed transactions, and performs 2PC commits.
+	Atomicity2PC = vtgateconn.Atomicity2PC
+)
+
+// WithAtomicity returns a context with the atomicity level set.
+func WithAtomicity(ctx context.Context, level vtgateconn.Atomicity) context.Context {
+	return vtgateconn.WithAtomicity(ctx, level)
+}
+
+// AtomicityFromContext returns the atomicity of the context.
+func AtomicityFromContext(ctx context.Context) vtgateconn.Atomicity {
+	return vtgateconn.AtomicityFromContext(ctx)
+}
+
+func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if c.Streaming {
+		return nil, errors.New("transaction not allowed for streaming connection")
+	}
 	if opts.Isolation != driver.IsolationLevel(0) || opts.ReadOnly {
 		return nil, errIsolationUnsupported
 	}
-	return c.Begin()
+	tx, err := c.vtgateConn.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.tx = tx
+	return c, nil
 }
 
 func (c *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -54,11 +73,11 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 		return nil, errors.New("Exec not allowed for streaming connections")
 	}
 
-	bv, err := c.convert.bindVarsFromNamedValues(args)
+	bv, err := bindVarsFromNamedValues(args)
 	if err != nil {
 		return nil, err
 	}
-	qr, err := c.session.Execute(ctx, query, bv)
+	qr, err := c.exec(ctx, query, bv)
 	if err != nil {
 		return nil, err
 	}
@@ -66,24 +85,24 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 }
 
 func (c *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	bv, err := c.convert.bindVarsFromNamedValues(args)
+	bv, err := bindVarsFromNamedValues(args)
 	if err != nil {
 		return nil, err
 	}
 
 	if c.Streaming {
-		stream, err := c.session.StreamExecute(ctx, query, bv)
+		stream, err := c.vtgateConn.StreamExecute(ctx, query, bv, c.tabletTypeProto, nil)
 		if err != nil {
 			return nil, err
 		}
-		return newStreamingRows(stream, nil, c.convert), nil
+		return newStreamingRows(stream, nil), nil
 	}
 
-	qr, err := c.session.Execute(ctx, query, bv)
+	qr, err := c.exec(ctx, query, bv)
 	if err != nil {
 		return nil, err
 	}
-	return newRows(qr, c.convert), nil
+	return newRows(qr), nil
 }
 
 func (s *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
@@ -92,4 +111,35 @@ func (s *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (drive
 
 func (s *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	return s.c.QueryContext(ctx, s.query, args)
+}
+
+func bindVarsFromNamedValues(args []driver.NamedValue) (map[string]interface{}, error) {
+	bv := make(map[string]interface{}, len(args))
+	nameUsed := false
+	for i, v := range args {
+		if i == 0 {
+			// Determine if args are based on names or ordinals.
+			if v.Name != "" {
+				nameUsed = true
+			}
+		} else {
+			// Verify that there's no intermixing.
+			if nameUsed && v.Name == "" {
+				return nil, errNoIntermixing
+			}
+			if !nameUsed && v.Name != "" {
+				return nil, errNoIntermixing
+			}
+		}
+		if v.Name == "" {
+			bv[fmt.Sprintf("v%d", i+1)] = v.Value
+		} else {
+			if v.Name[0] == ':' || v.Name[0] == '@' {
+				bv[v.Name[1:]] = v.Value
+			} else {
+				bv[v.Name] = v.Value
+			}
+		}
+	}
+	return bv, nil
 }

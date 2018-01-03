@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package schemaswap
 
 import (
@@ -610,23 +594,23 @@ func (shardSwap *shardSchemaSwap) readShardMetadata(metadata *shardSwapMetadata,
 		return
 	}
 	for _, row := range queryResult.Rows {
-		switch row[0].ToString() {
+		switch row[0].String() {
 		case lastStartedMetadataName:
-			swapID, err := sqltypes.ToUint64(row[1])
+			swapID, err := row[1].ParseUint64()
 			if err != nil {
-				log.Warningf("Could not parse value of last started schema swap id %v, ignoring the value: %v", row[1], err)
+				log.Warningf("Could not parse value of last started schema swap id ('%s'), ignoring the value: %v", row[1].String(), err)
 			} else {
 				metadata.lastStartedSwap = swapID
 			}
 		case lastFinishedMetadataName:
-			swapID, err := sqltypes.ToUint64(row[1])
+			swapID, err := row[1].ParseUint64()
 			if err != nil {
-				log.Warningf("Could not parse value of last finished schema swap id %v, ignoring the value: %v", row[1], err)
+				log.Warningf("Could not parse value of last finished schema swap id ('%s'), ignoring the value: %v", row[1].String(), err)
 			} else {
 				metadata.lastFinishedSwap = swapID
 			}
 		case currentSQLMetadataName:
-			metadata.currentSQL = row[1].ToString()
+			metadata.currentSQL = row[1].String()
 		}
 	}
 }
@@ -642,7 +626,10 @@ func (shardSwap *shardSchemaSwap) writeStartedSwap() error {
 	queryBuf.WriteString("INSERT INTO _vt.shard_metadata (name, value) VALUES ('")
 	queryBuf.WriteString(currentSQLMetadataName)
 	queryBuf.WriteString("',")
-	sqlValue := sqltypes.NewVarChar(shardSwap.parent.sql)
+	sqlValue, err := sqltypes.BuildValue(shardSwap.parent.sql)
+	if err != nil {
+		return err
+	}
 	sqlValue.EncodeSQL(&queryBuf)
 	queryBuf.WriteString(") ON DUPLICATE KEY UPDATE value = ")
 	sqlValue.EncodeSQL(&queryBuf)
@@ -905,7 +892,7 @@ func (shardSwap *shardSchemaSwap) isSwapApplied(tablet *topodatapb.Tablet) (bool
 		// No such row means we need to apply the swap.
 		return false, nil
 	}
-	swapID, err := sqltypes.ToUint64(swapIDResult.Rows[0][0])
+	swapID, err := swapIDResult.Rows[0][0].ParseUint64()
 	if err != nil {
 		return false, err
 	}

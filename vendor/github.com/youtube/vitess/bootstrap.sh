@@ -1,18 +1,8 @@
 #!/bin/bash
 
-# Copyright 2017 Google Inc.
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright 2012, Google Inc. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can
+# be found in the LICENSE file.
 
 SKIP_ROOT_INSTALLS=False
 if [ "$1" = "--skip_root_installs" ]; then
@@ -20,10 +10,7 @@ if [ "$1" = "--skip_root_installs" ]; then
 fi
 
 # Run parallel make, based on number of cores available.
-case $(uname) in
-  Linux)  NB_CORES=$(grep -c '^processor' /proc/cpuinfo);;
-  Darwin) NB_CORES=$(sysctl hw.ncpu | awk '{ print $2 }');;
-esac
+NB_CORES=$(grep -c '^processor' /proc/cpuinfo)
 if [ -n "$NB_CORES" ]; then
   export MAKEFLAGS="-j$((NB_CORES+1)) -l${NB_CORES}"
 fi
@@ -33,7 +20,9 @@ function fail() {
   exit 1
 }
 
-[ "$(dirname $0)" = '.' ] || fail "bootstrap.sh must be run from its current directory"
+[ -f bootstrap.sh ] || fail "bootstrap.sh must be run from its current directory"
+
+[ "$USER" != "root" ] || fail "Vitess cannot run as root. Please bootstrap with a non-root user."
 
 go version 2>&1 >/dev/null || fail "Go is not installed or is not on \$PATH"
 
@@ -267,9 +256,7 @@ selenium_dist=$VTROOT/dist/selenium
 mkdir -p $selenium_dist
 $VIRTUALENV $selenium_dist
 PIP=$selenium_dist/bin/pip
-# PYTHONPATH is removed for `pip install` because otherwise it can pick up go/dist/grpc/usr/local/lib/python2.7/site-packages
-# instead of go/dist/selenium/lib/python3.5/site-packages and then can't find module 'pip._vendor.requests'
-PYTHONPATH= $PIP install selenium
+$PIP install selenium
 mkdir -p $VTROOT/dist/chromedriver
 curl -sL http://chromedriver.storage.googleapis.com/2.25/chromedriver_linux64.zip > chromedriver_linux64.zip
 unzip -o -q chromedriver_linux64.zip -d $VTROOT/dist/chromedriver

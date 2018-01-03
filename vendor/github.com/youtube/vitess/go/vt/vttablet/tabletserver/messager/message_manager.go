@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2017, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package messager
 
@@ -25,58 +13,51 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/youtube/vitess/go/sqltypes"
-	"github.com/youtube/vitess/go/stats"
-	"github.com/youtube/vitess/go/sync2"
 	"github.com/youtube/vitess/go/timer"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/connpool"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
-
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
 )
 
-// MessageStats tracks stats for messages.
-var MessageStats = stats.NewMultiCounters("Messages", []string{"TableName", "Metric"})
-
-// MessageDelayTimings records total latency from queueing to sent to clients.
-var MessageDelayTimings = stats.NewMultiTimings("MessageDelay", []string{"TableName"})
-
 type messageReceiver struct {
-	ctx     context.Context
-	errChan chan error
-	send    func(*sqltypes.Result) error
-	cancel  context.CancelFunc
+	mu   sync.Mutex
+	send func(*sqltypes.Result) error
+	done chan struct{}
 }
 
-func newMessageReceiver(ctx context.Context, send func(*sqltypes.Result) error) (*messageReceiver, <-chan struct{}) {
-	ctx, cancel := context.WithCancel(ctx)
+func newMessageReceiver(send func(*sqltypes.Result) error) (*messageReceiver, chan struct{}) {
 	rcv := &messageReceiver{
-		ctx:     ctx,
-		errChan: make(chan error, 1),
-		send:    send,
-		cancel:  cancel,
+		send: send,
+		done: make(chan struct{}),
 	}
-	return rcv, ctx.Done()
+	return rcv, rcv.done
 }
 
 func (rcv *messageReceiver) Send(qr *sqltypes.Result) error {
-	// We have to use a channel so we can also
-	// monitor the context.
-	go func() {
-		rcv.errChan <- rcv.send(qr)
-	}()
-	select {
-	case <-rcv.ctx.Done():
+	rcv.mu.Lock()
+	defer rcv.mu.Unlock()
+	if rcv.done == nil {
 		return io.EOF
-	case err := <-rcv.errChan:
-		if err == io.EOF {
-			// This is only a failsafe. If we received an EOF,
-			// grpc would have already canceled the context.
-			rcv.cancel()
-		}
-		return err
 	}
+	err := rcv.send(qr)
+	if err == io.EOF {
+		close(rcv.done)
+		rcv.done = nil
+	}
+	return err
+}
+
+func (rcv *messageReceiver) Cancel() {
+	// Do this async to avoid getting stuck.
+	go func() {
+		rcv.mu.Lock()
+		defer rcv.mu.Unlock()
+		if rcv.done != nil {
+			close(rcv.done)
+			rcv.done = nil
+		}
+	}()
 }
 
 // receiverWithStatus is a separate struct to signify
@@ -94,15 +75,14 @@ type messageManager struct {
 
 	isOpen bool
 
-	name         sqlparser.TableIdent
-	fieldResult  *sqltypes.Result
-	ackWaitTime  time.Duration
-	purgeAfter   time.Duration
-	batchSize    int
-	pollerTicks  *timer.Timer
-	purgeTicks   *timer.Timer
-	conns        *connpool.Pool
-	postponeSema *sync2.Semaphore
+	name        sqlparser.TableIdent
+	fieldResult *sqltypes.Result
+	ackWaitTime time.Duration
+	purgeAfter  time.Duration
+	batchSize   int
+	pollerTicks *timer.Timer
+	purgeTicks  *timer.Timer
+	conns       *connpool.Pool
 
 	mu sync.Mutex
 	// cond gets triggered if a receiver becomes available (curReceiver != -1),
@@ -120,41 +100,35 @@ type messageManager struct {
 	// The goroutine must in turn defer on Done.
 	wg sync.WaitGroup
 
-	readByTimeNext    *sqlparser.ParsedQuery
-	loadMessagesQuery *sqlparser.ParsedQuery
-	ackQuery          *sqlparser.ParsedQuery
-	postponeQuery     *sqlparser.ParsedQuery
-	purgeQuery        *sqlparser.ParsedQuery
+	readByTimeNext *sqlparser.ParsedQuery
+	ackQuery       *sqlparser.ParsedQuery
+	postponeQuery  *sqlparser.ParsedQuery
+	purgeQuery     *sqlparser.ParsedQuery
 }
 
 // newMessageManager creates a new message manager.
 // Calls into tsv have to be made asynchronously. Otherwise,
 // it can lead to deadlocks.
-func newMessageManager(tsv TabletService, table *schema.Table, conns *connpool.Pool, postponeSema *sync2.Semaphore) *messageManager {
+func newMessageManager(tsv TabletService, table *schema.Table, conns *connpool.Pool) *messageManager {
 	mm := &messageManager{
 		tsv:  tsv,
 		name: table.Name,
 		fieldResult: &sqltypes.Result{
 			Fields: table.MessageInfo.Fields,
 		},
-		ackWaitTime:  table.MessageInfo.AckWaitDuration,
-		purgeAfter:   table.MessageInfo.PurgeAfterDuration,
-		batchSize:    table.MessageInfo.BatchSize,
-		cache:        newCache(table.MessageInfo.CacheSize),
-		pollerTicks:  timer.NewTimer(table.MessageInfo.PollInterval),
-		purgeTicks:   timer.NewTimer(table.MessageInfo.PollInterval),
-		conns:        conns,
-		postponeSema: postponeSema,
+		ackWaitTime: table.MessageInfo.AckWaitDuration,
+		purgeAfter:  table.MessageInfo.PurgeAfterDuration,
+		batchSize:   table.MessageInfo.BatchSize,
+		cache:       newCache(table.MessageInfo.CacheSize),
+		pollerTicks: timer.NewTimer(table.MessageInfo.PollInterval),
+		purgeTicks:  timer.NewTimer(table.MessageInfo.PollInterval),
+		conns:       conns,
 	}
 	mm.cond.L = &mm.mu
 
-	columnList := buildSelectColumnList(table)
 	mm.readByTimeNext = sqlparser.BuildParsedQuery(
-		"select time_next, epoch, time_created, %s from %v where time_next < %a order by time_next desc limit %a",
-		columnList, mm.name, ":time_next", ":max")
-	mm.loadMessagesQuery = sqlparser.BuildParsedQuery(
-		"select time_next, epoch, time_created, %s from %v where %a",
-		columnList, mm.name, ":#pk")
+		"select time_next, epoch, id, message from %v where time_next < %a order by time_next desc limit %a",
+		mm.name, ":time_next", ":max")
 	mm.ackQuery = sqlparser.BuildParsedQuery(
 		"update %v set time_acked = %a, time_next = null where id in %a and time_acked is null",
 		mm.name, ":time_acked", "::ids")
@@ -167,21 +141,6 @@ func newMessageManager(tsv TabletService, table *schema.Table, conns *connpool.P
 	return mm
 }
 
-// buildSelectColumnList is a convenience function that
-// builds a 'select' list for the user-defined columns.
-func buildSelectColumnList(t *schema.Table) string {
-	buf := sqlparser.NewTrackedBuffer(nil)
-	for i, c := range t.MessageInfo.Fields {
-		// Column names may have to be escaped.
-		if i == 0 {
-			buf.Myprintf("%v", sqlparser.NewColIdent(c.Name))
-		} else {
-			buf.Myprintf(", %v", sqlparser.NewColIdent(c.Name))
-		}
-	}
-	return buf.String()
-}
-
 // Open starts the messageManager service.
 func (mm *messageManager) Open() {
 	mm.mu.Lock()
@@ -192,7 +151,6 @@ func (mm *messageManager) Open() {
 	mm.isOpen = true
 	mm.wg.Add(1)
 	mm.curReceiver = -1
-
 	go mm.runSend()
 	// TODO(sougou): improve ticks to add randomness.
 	mm.pollerTicks.Start(mm.runPoller)
@@ -211,7 +169,7 @@ func (mm *messageManager) Close() {
 	}
 	mm.isOpen = false
 	for _, rcvr := range mm.receivers {
-		rcvr.receiver.cancel()
+		rcvr.receiver.Cancel()
 	}
 	mm.receivers = nil
 	mm.cache.Clear()
@@ -221,12 +179,8 @@ func (mm *messageManager) Close() {
 	mm.wg.Wait()
 }
 
-// Subscribe registers the send function as a receiver of messages
-// and returns a 'done' channel that will be closed when the subscription
-// ends. There are many reaons for a subscription to end: a grpc context
-// cancel or timeout, or tabletserver shutdown, etc.
-func (mm *messageManager) Subscribe(ctx context.Context, send func(*sqltypes.Result) error) <-chan struct{} {
-	receiver, done := newMessageReceiver(ctx, send)
+// Subscribe adds the receiver to the list of subsribers.
+func (mm *messageManager) Subscribe(receiver *messageReceiver) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	withStatus := &receiverWithStatus{
@@ -238,13 +192,6 @@ func (mm *messageManager) Subscribe(ctx context.Context, send func(*sqltypes.Res
 	// Send the message asynchronously.
 	mm.wg.Add(1)
 	go mm.send(withStatus, mm.fieldResult)
-
-	// Track the context and unsubscribe if it gets cancelled.
-	go func() {
-		<-done
-		mm.unsubscribe(receiver)
-	}()
-	return done
 }
 
 func (mm *messageManager) unsubscribe(receiver *messageReceiver) {
@@ -323,20 +270,13 @@ func (mm *messageManager) runSend() {
 				mm.cond.Wait()
 				continue
 			}
-			lateCount := int64(0)
-			timingsKey := []string{mm.name.String()}
 			for i := 0; i < mm.batchSize; i++ {
 				if mr := mm.cache.Pop(); mr != nil {
-					if mr.Epoch >= 1 {
-						lateCount++
-					}
-					MessageDelayTimings.Record(timingsKey, time.Unix(0, mr.TimeCreated))
-					rows = append(rows, mr.Row)
+					rows = append(rows, []sqltypes.Value{mr.ID, mr.Message})
 					continue
 				}
 				break
 			}
-			MessageStats.Add([]string{mm.name.String(), "Delayed"}, lateCount)
 			if rows != nil {
 				break
 			}
@@ -346,7 +286,6 @@ func (mm *messageManager) runSend() {
 			}
 			mm.cond.Wait()
 		}
-		MessageStats.Add([]string{mm.name.String(), "Sent"}, int64(len(rows)))
 		// If we're here, there is a current receiver, and messages
 		// to send. Reserve the receiver and find the next one.
 		receiver := mm.receivers[mm.curReceiver]
@@ -365,60 +304,49 @@ func (mm *messageManager) send(receiver *receiverWithStatus, qr *sqltypes.Result
 		tabletenv.LogError()
 		mm.wg.Done()
 	}()
-
-	ids := make([]string, len(qr.Rows))
-	for i, row := range qr.Rows {
-		ids[i] = row[0].ToString()
-	}
-
-	// This is the cleanup.
-	defer func() {
-		// Discard messages from cache only at the end. This will
-		// prevent them from being requeued while they're being postponed.
-		mm.cache.Discard(ids)
-
-		mm.mu.Lock()
-		defer mm.mu.Unlock()
-
-		receiver.busy = false
-		// Rescan if there were no previously available receivers
-		// because the current receiver became non-busy.
-		if mm.curReceiver == -1 {
-			mm.rescanReceivers(-1)
-		}
-	}()
-
 	if err := receiver.receiver.Send(qr); err != nil {
 		if err == io.EOF {
-			// If the receiver ended the stream, we want the messages
-			// to be resent ASAP without postponement. Setting messagesPending
-			// will trigger the poller as soon as the cache is clear.
-			mm.mu.Lock()
-			mm.messagesPending = true
-			mm.mu.Unlock()
 			// No need to call Cancel. messageReceiver already
 			// does that before returning this error.
 			mm.unsubscribe(receiver.receiver)
 		} else {
 			log.Errorf("Error sending messages: %v", qr)
 		}
+	}
+	mm.mu.Lock()
+	receiver.busy = false
+	if mm.curReceiver == -1 {
+		// Since the current receiver became non-busy,
+		// rescan.
+		mm.rescanReceivers(-1)
+	}
+	mm.mu.Unlock()
+	if len(qr.Rows) == 0 {
+		// It was just a Fields send.
 		return
 	}
-	mm.postpone(mm.tsv, mm.name.String(), mm.ackWaitTime, ids)
+	ids := make([]string, len(qr.Rows))
+	for i, row := range qr.Rows {
+		ids[i] = row[0].String()
+	}
+	// postpone should discard, but this is a safety measure
+	// in case it fails.
+	mm.cache.Discard(ids)
+	go postpone(mm.tsv, mm.name.String(), mm.ackWaitTime, ids)
 }
 
-func (mm *messageManager) postpone(tsv TabletService, name string, ackWaitTime time.Duration, ids []string) {
-	// Use the semaphore to limit parallelism.
-	if !mm.postponeSema.Acquire() {
-		// Unreachable.
-		return
-	}
-	defer mm.postponeSema.Release()
+// postpone is a non-member because it should be called asynchronously and should
+// not rely on members of messageManager.
+func postpone(tsv TabletService, name string, ackWaitTime time.Duration, ids []string) {
 	ctx, cancel := context.WithTimeout(tabletenv.LocalContext(), ackWaitTime)
-	defer cancel()
-	if _, err := tsv.PostponeMessages(ctx, nil, name, ids); err != nil {
-		// This can happen during spikes. Record the incident for monitoring.
-		MessageStats.Add([]string{mm.name.String(), "PostponeFailed"}, 1)
+	defer func() {
+		tabletenv.LogError()
+		cancel()
+	}()
+	_, err := tsv.PostponeMessages(ctx, nil, name, ids)
+	if err != nil {
+		// TODO(sougou): increment internal error.
+		log.Errorf("Unable to postpone messages %v: %v", ids, err)
 	}
 }
 
@@ -430,7 +358,7 @@ func (mm *messageManager) runPoller() {
 	}()
 	conn, err := mm.conns.Get(ctx)
 	if err != nil {
-		tabletenv.InternalErrors.Add("Messages", 1)
+		// TODO(sougou): increment internal error.
 		log.Errorf("Error getting connection: %v", err)
 		return
 	}
@@ -445,9 +373,9 @@ func (mm *messageManager) runPoller() {
 		defer mm.DBLock.Unlock()
 
 		size := mm.cache.Size()
-		bindVars := map[string]*querypb.BindVariable{
-			"time_next": sqltypes.Int64BindVariable(time.Now().UnixNano()),
-			"max":       sqltypes.Int64BindVariable(int64(size)),
+		bindVars := map[string]interface{}{
+			"time_next": int64(time.Now().UnixNano()),
+			"max":       int64(size),
 		}
 		qr, err := mm.read(ctx, conn, mm.readByTimeNext, bindVars)
 		if err != nil {
@@ -474,7 +402,7 @@ func (mm *messageManager) runPoller() {
 		for _, row := range qr.Rows {
 			mr, err := BuildMessageRow(row)
 			if err != nil {
-				tabletenv.InternalErrors.Add("Messages", 1)
+				// TODO(sougou): increment internal error.
 				log.Errorf("Error reading message row: %v", err)
 				continue
 			}
@@ -501,10 +429,9 @@ func purge(tsv TabletService, name string, purgeAfter, purgeInterval time.Durati
 	for {
 		count, err := tsv.PurgeMessages(ctx, nil, name, time.Now().Add(-purgeAfter).UnixNano())
 		if err != nil {
-			tabletenv.InternalErrors.Add("Messages", 1)
+			// TODO(sougou): increment internal error.
 			log.Errorf("Unable to delete messages: %v", err)
 		}
-		MessageStats.Add([]string{name, "Purged"}, count)
 		// If deleted 500 or more, we should continue.
 		if count < 500 {
 			return
@@ -513,68 +440,52 @@ func purge(tsv TabletService, name string, purgeAfter, purgeInterval time.Durati
 }
 
 // GenerateAckQuery returns the query and bind vars for acking a message.
-func (mm *messageManager) GenerateAckQuery(ids []string) (string, map[string]*querypb.BindVariable) {
-	idbvs := &querypb.BindVariable{
-		Type:   querypb.Type_TUPLE,
-		Values: make([]*querypb.Value, 0, len(ids)),
+func (mm *messageManager) GenerateAckQuery(ids []string) (string, map[string]interface{}) {
+	idbvs := make([]interface{}, len(ids))
+	for i, id := range ids {
+		idbvs[i] = id
 	}
-	for _, id := range ids {
-		idbvs.Values = append(idbvs.Values, &querypb.Value{
-			Type:  querypb.Type_VARCHAR,
-			Value: []byte(id),
-		})
-	}
-	return mm.ackQuery.Query, map[string]*querypb.BindVariable{
-		"time_acked": sqltypes.Int64BindVariable(time.Now().UnixNano()),
+	return mm.ackQuery.Query, map[string]interface{}{
+		"time_acked": int64(time.Now().UnixNano()),
 		"ids":        idbvs,
 	}
 }
 
 // GeneratePostponeQuery returns the query and bind vars for postponing a message.
-func (mm *messageManager) GeneratePostponeQuery(ids []string) (string, map[string]*querypb.BindVariable) {
-	idbvs := &querypb.BindVariable{
-		Type:   querypb.Type_TUPLE,
-		Values: make([]*querypb.Value, 0, len(ids)),
+func (mm *messageManager) GeneratePostponeQuery(ids []string) (string, map[string]interface{}) {
+	idbvs := make([]interface{}, len(ids))
+	for i, id := range ids {
+		idbvs[i] = id
 	}
-	for _, id := range ids {
-		idbvs.Values = append(idbvs.Values, &querypb.Value{
-			Type:  querypb.Type_VARCHAR,
-			Value: []byte(id),
-		})
-	}
-	return mm.postponeQuery.Query, map[string]*querypb.BindVariable{
-		"time_now":  sqltypes.Int64BindVariable(time.Now().UnixNano()),
-		"wait_time": sqltypes.Int64BindVariable(int64(mm.ackWaitTime)),
+	return mm.postponeQuery.Query, map[string]interface{}{
+		"time_now":  int64(time.Now().UnixNano()),
+		"wait_time": int64(mm.ackWaitTime),
 		"ids":       idbvs,
 	}
 }
 
 // GeneratePurgeQuery returns the query and bind vars for purging messages.
-func (mm *messageManager) GeneratePurgeQuery(timeCutoff int64) (string, map[string]*querypb.BindVariable) {
-	return mm.purgeQuery.Query, map[string]*querypb.BindVariable{
-		"time_scheduled": sqltypes.Int64BindVariable(timeCutoff),
+func (mm *messageManager) GeneratePurgeQuery(timeCutoff int64) (string, map[string]interface{}) {
+	return mm.purgeQuery.Query, map[string]interface{}{
+		"time_scheduled": timeCutoff,
 	}
 }
 
 // BuildMessageRow builds a MessageRow for a db row.
 func BuildMessageRow(row []sqltypes.Value) (*MessageRow, error) {
-	timeNext, err := sqltypes.ToInt64(row[0])
+	timeNext, err := row[0].ParseInt64()
 	if err != nil {
 		return nil, err
 	}
-	epoch, err := sqltypes.ToInt64(row[1])
-	if err != nil {
-		return nil, err
-	}
-	timeCreated, err := sqltypes.ToInt64(row[2])
+	epoch, err := row[1].ParseInt64()
 	if err != nil {
 		return nil, err
 	}
 	return &MessageRow{
-		TimeNext:    timeNext,
-		Epoch:       epoch,
-		TimeCreated: timeCreated,
-		Row:         row[3:],
+		TimeNext: timeNext,
+		Epoch:    epoch,
+		ID:       row[2],
+		Message:  row[3],
 	}, nil
 }
 
@@ -584,10 +495,10 @@ func (mm *messageManager) receiverCount() int {
 	return len(mm.receivers)
 }
 
-func (mm *messageManager) read(ctx context.Context, conn *connpool.DBConn, pq *sqlparser.ParsedQuery, bindVars map[string]*querypb.BindVariable) (*sqltypes.Result, error) {
-	b, err := pq.GenerateQuery(bindVars, nil)
+func (mm *messageManager) read(ctx context.Context, conn *connpool.DBConn, pq *sqlparser.ParsedQuery, bindVars map[string]interface{}) (*sqltypes.Result, error) {
+	b, err := pq.GenerateQuery(bindVars)
 	if err != nil {
-		tabletenv.InternalErrors.Add("Messages", 1)
+		// TODO(sougou): increment internal error.
 		log.Errorf("Error reading rows from message table: %v", err)
 		return nil, err
 	}

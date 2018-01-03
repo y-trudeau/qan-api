@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package splitquery
 
 import (
@@ -21,16 +5,14 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
-
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
+	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/querytypes"
 )
 
 var splitParamsTestCases = []struct {
 	SQL                 string
-	BindVariables       map[string]*querypb.BindVariable
+	BindVariables       map[string]interface{}
 	SplitColumnNames    []sqlparser.ColIdent
 	NumRowsPerQueryPart int64
 	SplitCount          int64
@@ -41,7 +23,7 @@ var splitParamsTestCases = []struct {
 }{
 	{ // Test NewSplitParamsGivenSplitCount; correct input.
 		SQL:              "select id from test_table",
-		BindVariables:    map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:    map[string]interface{}{"foo": "123"},
 		SplitColumnNames: []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		SplitCount:       100,
 		Schema:           getTestSchema(),
@@ -55,7 +37,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; correct input.
 		SQL:                 "select user_id from test_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -69,7 +51,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; correct input; default split columns
 		SQL:                 "select user_id from test_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
 
@@ -86,7 +68,7 @@ var splitParamsTestCases = []struct {
 
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; invalid query.
 		SQL:                 "not a valid query",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -95,7 +77,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; not a select statement.
 		SQL:                 "delete from test_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -104,7 +86,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unsupported select statement.
 		SQL:                 "select t1.user_id from test_table as t1 join test_table as t2",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -113,7 +95,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unsupported select statement.
 		SQL:                 "select distinct user_id from test_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -122,7 +104,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unsupported select statement.
 		SQL:                 "select user_id from test_table group by id",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -131,7 +113,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unsupported select statement.
 		SQL:                 "select user_id from test_table having user_id > 5",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -140,7 +122,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unsupported select statement.
 		SQL:                 "select user_id from test_table order by id asc",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -149,7 +131,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unsupported select statement.
 		SQL:                 "select user_id from test_table lock in share mode",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -158,7 +140,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unsupported select statement.
 		SQL:                 "select user_id from (select * from test_table) as t1",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -167,7 +149,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unknown table.
 		SQL:                 "select user_id from missing_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("id")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -176,7 +158,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; unknown split column.
 		SQL:                 "select * from test_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("missing_column")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -185,7 +167,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; split columns not a prefix of an index.
 		SQL:                 "select * from test_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{sqlparser.NewColIdent("float32_col")},
 		NumRowsPerQueryPart: 100,
 		Schema:              getTestSchema(),
@@ -195,7 +177,7 @@ var splitParamsTestCases = []struct {
 	},
 	{ // Test NewSplitParamsGivenNumRowsPerQueryPart; no split columns and no primary keys.
 		SQL:                 "select id from test_table",
-		BindVariables:       map[string]*querypb.BindVariable{"foo": sqltypes.StringBindVariable("123")},
+		BindVariables:       map[string]interface{}{"foo": "123"},
 		SplitColumnNames:    []sqlparser.ColIdent{},
 		NumRowsPerQueryPart: 100,
 		Schema: func() map[string]*schema.Table {
@@ -216,7 +198,7 @@ func TestSplitParams(t *testing.T) {
 		var err error
 		if testCase.NumRowsPerQueryPart != 0 {
 			splitParams, err = NewSplitParamsGivenNumRowsPerQueryPart(
-				&querypb.BoundQuery{
+				querytypes.BoundQuery{
 					Sql:           testCase.SQL,
 					BindVariables: testCase.BindVariables,
 				},
@@ -225,7 +207,7 @@ func TestSplitParams(t *testing.T) {
 				testCase.Schema)
 		} else {
 			splitParams, err = NewSplitParamsGivenSplitCount(
-				&querypb.BoundQuery{
+				querytypes.BoundQuery{
 					Sql:           testCase.SQL,
 					BindVariables: testCase.BindVariables,
 				},

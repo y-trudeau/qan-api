@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletmanager
 
@@ -24,7 +12,7 @@ import (
 	log "github.com/golang/glog"
 	"golang.org/x/net/context"
 
-	"github.com/youtube/vitess/go/mysql"
+	"github.com/youtube/vitess/go/mysqlconn/replication"
 	"github.com/youtube/vitess/go/vt/mysqlctl"
 	"github.com/youtube/vitess/go/vt/topo"
 	"github.com/youtube/vitess/go/vt/topo/topoproto"
@@ -44,7 +32,7 @@ func (agent *ActionAgent) SlaveStatus(ctx context.Context) (*replicationdatapb.S
 	if err != nil {
 		return nil, err
 	}
-	return mysql.SlaveStatusToProto(status), nil
+	return mysqlctl.StatusToProto(status), nil
 }
 
 // MasterPosition returns the master position
@@ -53,10 +41,10 @@ func (agent *ActionAgent) MasterPosition(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return mysql.EncodePosition(pos), nil
+	return replication.EncodePosition(pos), nil
 }
 
-// StopSlave will stop the mysql. Works both when Vitess manages
+// StopSlave will stop the replication. Works both when Vitess manages
 // replication or not (using hook if not).
 func (agent *ActionAgent) StopSlave(ctx context.Context) error {
 	if err := agent.lock(ctx); err != nil {
@@ -96,7 +84,7 @@ func (agent *ActionAgent) StopSlaveMinimum(ctx context.Context, position string,
 	}
 	defer agent.unlock()
 
-	pos, err := mysql.DecodePosition(position)
+	pos, err := replication.DecodePosition(position)
 	if err != nil {
 		return "", err
 	}
@@ -112,10 +100,10 @@ func (agent *ActionAgent) StopSlaveMinimum(ctx context.Context, position string,
 	if err != nil {
 		return "", err
 	}
-	return mysql.EncodePosition(pos), nil
+	return replication.EncodePosition(pos), nil
 }
 
-// StartSlave will start the mysql. Works both when Vitess manages
+// StartSlave will start the replication. Works both when Vitess manages
 // replication or not (using hook if not).
 func (agent *ActionAgent) StartSlave(ctx context.Context) error {
 	if err := agent.lock(ctx); err != nil {
@@ -155,8 +143,12 @@ func (agent *ActionAgent) ResetReplication(ctx context.Context) error {
 	}
 	defer agent.unlock()
 
+	cmds, err := agent.MysqlDaemon.ResetReplicationCommands()
+	if err != nil {
+		return err
+	}
 	agent.setSlaveStopped(true)
-	return agent.MysqlDaemon.ResetReplication(ctx)
+	return agent.MysqlDaemon.ExecuteSuperQueryList(ctx, cmds)
 }
 
 // InitMaster enables writes and returns the replication position.
@@ -194,7 +186,7 @@ func (agent *ActionAgent) InitMaster(ctx context.Context) (string, error) {
 	if err := agent.MysqlDaemon.SetReadOnly(false); err != nil {
 		return "", err
 	}
-	agent.setExternallyReparentedTime(startTime)
+	agent.setLastReparentedTime(startTime)
 
 	// Change our type to master if not already
 	if _, err := agent.TopoServer.UpdateTabletFields(ctx, agent.TabletAlias, func(tablet *topodatapb.Tablet) error {
@@ -209,12 +201,12 @@ func (agent *ActionAgent) InitMaster(ctx context.Context) (string, error) {
 	if err := agent.refreshTablet(ctx, "InitMaster"); err != nil {
 		return "", err
 	}
-	return mysql.EncodePosition(pos), nil
+	return replication.EncodePosition(pos), nil
 }
 
 // PopulateReparentJournal adds an entry into the reparent_journal table.
 func (agent *ActionAgent) PopulateReparentJournal(ctx context.Context, timeCreatedNS int64, actionName string, masterAlias *topodatapb.TabletAlias, position string) error {
-	pos, err := mysql.DecodePosition(position)
+	pos, err := replication.DecodePosition(position)
 	if err != nil {
 		return err
 	}
@@ -232,7 +224,7 @@ func (agent *ActionAgent) InitSlave(ctx context.Context, parent *topodatapb.Tabl
 	}
 	defer agent.unlock()
 
-	pos, err := mysql.DecodePosition(position)
+	pos, err := replication.DecodePosition(position)
 	if err != nil {
 		return err
 	}
@@ -254,10 +246,18 @@ func (agent *ActionAgent) InitSlave(ctx context.Context, parent *topodatapb.Tabl
 		return err
 	}
 
-	if err := agent.MysqlDaemon.SetSlavePosition(ctx, pos); err != nil {
+	cmds, err := agent.MysqlDaemon.SetSlavePositionCommands(pos)
+	if err != nil {
 		return err
 	}
-	if err := agent.MysqlDaemon.SetMaster(ctx, topoproto.MysqlHostname(ti.Tablet), int(topoproto.MysqlPort(ti.Tablet)), false /* slaveStopBefore */, true /* slaveStartAfter */); err != nil {
+	cmds2, err := agent.MysqlDaemon.SetMasterCommands(ti.Hostname, int(ti.PortMap["mysql"]))
+	if err != nil {
+		return err
+	}
+	cmds = append(cmds, cmds2...)
+	cmds = append(cmds, "START SLAVE")
+
+	if err := agent.MysqlDaemon.ExecuteSuperQueryList(ctx, cmds); err != nil {
 		return err
 	}
 	agent.initReplication = true
@@ -312,7 +312,7 @@ func (agent *ActionAgent) DemoteMaster(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return mysql.EncodePosition(pos), nil
+	return replication.EncodePosition(pos), nil
 	// There is no serving graph update - the master tablet will
 	// be replaced. Even though writes may fail, reads will
 	// succeed. It will be less noisy to simply leave the entry
@@ -328,7 +328,7 @@ func (agent *ActionAgent) PromoteSlaveWhenCaughtUp(ctx context.Context, position
 	}
 	defer agent.unlock()
 
-	pos, err := mysql.DecodePosition(position)
+	pos, err := replication.DecodePosition(position)
 	if err != nil {
 		return "", err
 	}
@@ -351,7 +351,7 @@ func (agent *ActionAgent) PromoteSlaveWhenCaughtUp(ctx context.Context, position
 	if err := agent.MysqlDaemon.SetReadOnly(false); err != nil {
 		return "", err
 	}
-	agent.setExternallyReparentedTime(startTime)
+	agent.setLastReparentedTime(startTime)
 
 	if _, err := topotools.ChangeType(ctx, agent.TopoServer, agent.TabletAlias, topodatapb.TabletType_MASTER); err != nil {
 		return "", err
@@ -361,7 +361,7 @@ func (agent *ActionAgent) PromoteSlaveWhenCaughtUp(ctx context.Context, position
 		return "", err
 	}
 
-	return mysql.EncodePosition(pos), nil
+	return replication.EncodePosition(pos), nil
 }
 
 // SlaveWasPromoted promotes a slave to master, no questions asked.
@@ -422,8 +422,20 @@ func (agent *ActionAgent) setMasterLocked(ctx context.Context, parentAlias *topo
 		}
 	}
 
-	// Sets the master.
-	if err := agent.MysqlDaemon.SetMaster(ctx, topoproto.MysqlHostname(parent.Tablet), int(topoproto.MysqlPort(parent.Tablet)), wasReplicating, shouldbeReplicating); err != nil {
+	// Create the list of commands to set the master
+	cmds := []string{}
+	if wasReplicating {
+		cmds = append(cmds, mysqlctl.SQLStopSlave)
+	}
+	smc, err := agent.MysqlDaemon.SetMasterCommands(parent.Hostname, int(parent.PortMap["mysql"]))
+	if err != nil {
+		return err
+	}
+	cmds = append(cmds, smc...)
+	if shouldbeReplicating {
+		cmds = append(cmds, mysqlctl.SQLStartSlave)
+	}
+	if err := agent.MysqlDaemon.ExecuteSuperQueryList(ctx, cmds); err != nil {
 		return err
 	}
 
@@ -503,7 +515,7 @@ func (agent *ActionAgent) StopReplicationAndGetStatus(ctx context.Context) (*rep
 	}
 	if !rs.SlaveIORunning && !rs.SlaveSQLRunning {
 		// no replication is running, just return what we got
-		return mysql.SlaveStatusToProto(rs), nil
+		return mysqlctl.StatusToProto(rs), nil
 	}
 	if err := agent.stopSlaveLocked(ctx); err != nil {
 		return nil, fmt.Errorf("stop slave failed: %v", err)
@@ -513,7 +525,7 @@ func (agent *ActionAgent) StopReplicationAndGetStatus(ctx context.Context) (*rep
 	if err != nil {
 		return nil, fmt.Errorf("after position failed: %v", err)
 	}
-	return mysql.SlaveStatusToProto(rs), nil
+	return mysqlctl.StatusToProto(rs), nil
 }
 
 // PromoteSlave makes the current tablet the master
@@ -538,7 +550,7 @@ func (agent *ActionAgent) PromoteSlave(ctx context.Context) (string, error) {
 	if err := agent.MysqlDaemon.SetReadOnly(false); err != nil {
 		return "", err
 	}
-	agent.setExternallyReparentedTime(startTime)
+	agent.setLastReparentedTime(startTime)
 
 	if _, err := topotools.ChangeType(ctx, agent.TopoServer, agent.TabletAlias, topodatapb.TabletType_MASTER); err != nil {
 		return "", err
@@ -548,7 +560,7 @@ func (agent *ActionAgent) PromoteSlave(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	return mysql.EncodePosition(pos), nil
+	return replication.EncodePosition(pos), nil
 }
 
 func isMasterEligible(tabletType topodatapb.TabletType) bool {

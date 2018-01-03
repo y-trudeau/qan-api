@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package rules
 
@@ -24,10 +12,12 @@ import (
 	"strconv"
 
 	"github.com/youtube/vitess/go/sqltypes"
-	"github.com/youtube/vitess/go/vt/vterrors"
+	"github.com/youtube/vitess/go/vt/key"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/planbuilder"
+	"github.com/youtube/vitess/go/vt/vterrors"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
+	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
 )
 
@@ -141,8 +131,7 @@ func (qrs *Rules) FilterByPlan(query string, planid planbuilder.PlanType, tableN
 	return &Rules{newrules}
 }
 
-// GetAction runs the input against the rules engine and returns the action to be performed.
-func (qrs *Rules) GetAction(ip, user string, bindVars map[string]*querypb.BindVariable) (action Action, desc string) {
+func (qrs *Rules) GetAction(ip, user string, bindVars map[string]interface{}) (action Action, desc string) {
 	for _, qr := range qrs.rules {
 		if act := qr.GetAction(ip, user, bindVars); act != QRContinue {
 			return act, qr.Description
@@ -312,6 +301,7 @@ func makeExact(pattern string) string {
 // uint64   ==, !=, <, >=, >, <=                   whole numbers
 // int64    ==, !=, <, >=, >, <=                   whole numbers
 // string   ==, !=, <, >=, >, <=, MATCH, NOMATCH   []byte, string
+// KeyRange IN, NOTIN                              whole numbers
 // whole numbers can be: int, int8, int16, int32, int64, uint64
 func (qr *Rule) AddBindVarCond(name string, onAbsent, onMismatch bool, op Operator, value interface{}) error {
 	var converted bvcValue
@@ -344,6 +334,12 @@ func (qr *Rule) AddBindVarCond(name string, onAbsent, onMismatch bool, op Operat
 		} else {
 			goto Error
 		}
+	case *topodatapb.KeyRange:
+		if op < QRIn || op > QRNotIn {
+			goto Error
+		}
+		b := bvcKeyRange(*v)
+		converted = &b
 	default:
 		return vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "type %T not allowed as condition operand (%v)", value, value)
 	}
@@ -375,8 +371,7 @@ func (qr *Rule) FilterByPlan(query string, planid planbuilder.PlanType, tableNam
 	return newqr
 }
 
-// GetAction returns the action for a single rule.
-func (qr *Rule) GetAction(ip, user string, bindVars map[string]*querypb.BindVariable) Action {
+func (qr *Rule) GetAction(ip, user string, bindVars map[string]interface{}) Action {
 	if !reMatch(qr.requestIP.Regexp, ip) {
 		return QRContinue
 	}
@@ -419,7 +414,7 @@ func tableMatch(tableNames []string, tableName string) bool {
 	return false
 }
 
-func bvMatch(bvcond BindVarCond, bindVars map[string]*querypb.BindVariable) bool {
+func bvMatch(bvcond BindVarCond, bindVars map[string]interface{}) bool {
 	bv, ok := bindVars[bvcond.name]
 	if !ok {
 		return bvcond.onAbsent
@@ -498,6 +493,8 @@ const (
 	QRLessEqual
 	QRMatch
 	QRNoMatch
+	QRIn
+	QRNotIn
 	QRNumOp
 )
 
@@ -511,6 +508,8 @@ var opmap = map[string]Operator{
 	"<=":      QRLessEqual,
 	"MATCH":   QRMatch,
 	"NOMATCH": QRNoMatch,
+	"IN":      QRIn,
+	"NOTIN":   QRNotIn,
 }
 
 var opnames []string
@@ -537,12 +536,12 @@ func (op Operator) MarshalJSON() ([]byte, error) {
 // bvcValue defines the common interface
 // for all bind var condition values
 type bvcValue interface {
-	eval(bv *querypb.BindVariable, op Operator, onMismatch bool) bool
+	eval(bv interface{}, op Operator, onMismatch bool) bool
 }
 
 type bvcuint64 uint64
 
-func (uval bvcuint64) eval(bv *querypb.BindVariable, op Operator, onMismatch bool) bool {
+func (uval bvcuint64) eval(bv interface{}, op Operator, onMismatch bool) bool {
 	num, status := getuint64(bv)
 	switch op {
 	case QREqual:
@@ -596,7 +595,7 @@ func (uval bvcuint64) eval(bv *querypb.BindVariable, op Operator, onMismatch boo
 
 type bvcint64 int64
 
-func (ival bvcint64) eval(bv *querypb.BindVariable, op Operator, onMismatch bool) bool {
+func (ival bvcint64) eval(bv interface{}, op Operator, onMismatch bool) bool {
 	num, status := getint64(bv)
 	switch op {
 	case QREqual:
@@ -650,7 +649,7 @@ func (ival bvcint64) eval(bv *querypb.BindVariable, op Operator, onMismatch bool
 
 type bvcstring string
 
-func (sval bvcstring) eval(bv *querypb.BindVariable, op Operator, onMismatch bool) bool {
+func (sval bvcstring) eval(bv interface{}, op Operator, onMismatch bool) bool {
 	str, status := getstring(bv)
 	if status != QROK {
 		return onMismatch
@@ -676,7 +675,7 @@ type bvcre struct {
 	re *regexp.Regexp
 }
 
-func (reval bvcre) eval(bv *querypb.BindVariable, op Operator, onMismatch bool) bool {
+func (reval bvcre) eval(bv interface{}, op Operator, onMismatch bool) bool {
 	str, status := getstring(bv)
 	if status != QROK {
 		return onMismatch
@@ -690,36 +689,185 @@ func (reval bvcre) eval(bv *querypb.BindVariable, op Operator, onMismatch bool) 
 	panic("unreachable")
 }
 
+type bvcKeyRange topodatapb.KeyRange
+
+func (krval *bvcKeyRange) eval(bv interface{}, op Operator, onMismatch bool) bool {
+	switch op {
+	case QRIn:
+		switch num, status := getuint64(bv); status {
+		case QROK:
+			k := key.Uint64Key(num).Bytes()
+			return key.KeyRangeContains((*topodatapb.KeyRange)(krval), k)
+		case QROutOfRange:
+			return false
+		}
+		// Not a number. Check string.
+		switch str, status := getstring(bv); status {
+		case QROK:
+			return key.KeyRangeContains((*topodatapb.KeyRange)(krval), []byte(str))
+		}
+	case QRNotIn:
+		switch num, status := getuint64(bv); status {
+		case QROK:
+			k := key.Uint64Key(num).Bytes()
+			return !key.KeyRangeContains((*topodatapb.KeyRange)(krval), k)
+		case QROutOfRange:
+			return true
+		}
+		// Not a number. Check string.
+		switch str, status := getstring(bv); status {
+		case QROK:
+			return !key.KeyRangeContains((*topodatapb.KeyRange)(krval), []byte(str))
+		}
+	default:
+		panic("unreachable")
+	}
+	return onMismatch
+}
+
 // getuint64 returns QROutOfRange for negative values
-func getuint64(val *querypb.BindVariable) (uv uint64, status int) {
-	bv, err := sqltypes.BindVariableToValue(val)
-	if err != nil {
+func getuint64(val interface{}) (uv uint64, status int) {
+	switch v := val.(type) {
+	case int:
+		if v < 0 {
+			return 0, QROutOfRange
+		}
+		return uint64(v), QROK
+	case int8:
+		if v < 0 {
+			return 0, QROutOfRange
+		}
+		return uint64(v), QROK
+	case int16:
+		if v < 0 {
+			return 0, QROutOfRange
+		}
+		return uint64(v), QROK
+	case int32:
+		if v < 0 {
+			return 0, QROutOfRange
+		}
+		return uint64(v), QROK
+	case int64:
+		if v < 0 {
+			return 0, QROutOfRange
+		}
+		return uint64(v), QROK
+	case uint:
+		return uint64(v), QROK
+	case uint8:
+		return uint64(v), QROK
+	case uint16:
+		return uint64(v), QROK
+	case uint32:
+		if v < 0 {
+			return 0, QROutOfRange
+		}
+		return uint64(v), QROK
+	case uint64:
+		return v, QROK
+	case *querypb.BindVariable:
+		if sqltypes.IsSigned(v.Type) {
+			signed, err := strconv.ParseInt(string(v.Value), 0, 64)
+			if err != nil {
+				return 0, QROutOfRange
+			}
+			if signed < 0 {
+				return 0, QROutOfRange
+			}
+			return uint64(signed), QROK
+		}
+		if sqltypes.IsUnsigned(v.Type) {
+			unsigned, err := strconv.ParseUint(string(v.Value), 0, 64)
+			if err != nil {
+				return 0, QROutOfRange
+			}
+			return uint64(unsigned), QROK
+		}
+		if sqltypes.IsText(v.Type) || sqltypes.IsBinary(v.Type) {
+			// We only want unsigned, just try to parse it.
+			unsigned, err := strconv.ParseUint(string(v.Value), 0, 64)
+			if err != nil {
+				return 0, QROutOfRange
+			}
+			return uint64(unsigned), QROK
+		}
 		return 0, QROutOfRange
 	}
-	v, err := sqltypes.ToUint64(bv)
-	if err != nil {
-		return 0, QROutOfRange
-	}
-	return v, QROK
+	return 0, QRMismatch
 }
 
 // getint64 returns QROutOfRange if a uint64 is too large
-func getint64(val *querypb.BindVariable) (iv int64, status int) {
-	bv, err := sqltypes.BindVariableToValue(val)
-	if err != nil {
+func getint64(val interface{}) (iv int64, status int) {
+	switch v := val.(type) {
+	case int:
+		return int64(v), QROK
+	case int8:
+		return int64(v), QROK
+	case int16:
+		return int64(v), QROK
+	case int32:
+		return int64(v), QROK
+	case int64:
+		return int64(v), QROK
+	case uint:
+		if v > 0x7FFFFFFFFFFFFFFF { // largest int64
+			return 0, QROutOfRange
+		}
+		return int64(v), QROK
+	case uint8:
+		return int64(v), QROK
+	case uint16:
+		return int64(v), QROK
+	case uint32:
+		return int64(v), QROK
+	case uint64:
+		if v > 0x7FFFFFFFFFFFFFFF { // largest int64
+			return 0, QROutOfRange
+		}
+		return int64(v), QROK
+	case *querypb.BindVariable:
+		if sqltypes.IsSigned(v.Type) {
+			signed, err := strconv.ParseInt(string(v.Value), 0, 64)
+			if err != nil {
+				return 0, QROutOfRange
+			}
+			return int64(signed), QROK
+		}
+		if sqltypes.IsUnsigned(v.Type) {
+			unsigned, err := strconv.ParseUint(string(v.Value), 0, 64)
+			if err != nil {
+				return 0, QROutOfRange
+			}
+			if unsigned > 0x7FFFFFFFFFFFFFFF { // largest int64
+				return 0, QROutOfRange
+			}
+			return int64(unsigned), QROK
+		}
+		if sqltypes.IsText(v.Type) || sqltypes.IsBinary(v.Type) {
+			// We only want signed, just try to parse it.
+			signed, err := strconv.ParseInt(string(v.Value), 0, 64)
+			if err != nil {
+				return 0, QROutOfRange
+			}
+			return int64(signed), QROK
+		}
 		return 0, QROutOfRange
 	}
-	v, err := sqltypes.ToInt64(bv)
-	if err != nil {
-		return 0, QROutOfRange
-	}
-	return v, QROK
+	return 0, QRMismatch
 }
 
-// TODO(sougou): this is inefficient. Optimize to use []byte.
-func getstring(val *querypb.BindVariable) (s string, status int) {
-	if sqltypes.IsIntegral(val.Type) || sqltypes.IsFloat(val.Type) || sqltypes.IsText(val.Type) || sqltypes.IsBinary(val.Type) {
-		return string(val.Value), QROK
+func getstring(val interface{}) (sv string, status int) {
+	switch v := val.(type) {
+	case []byte:
+		return string(v), QROK
+	case string:
+		return v, QROK
+	case *querypb.BindVariable:
+		// We use the raw bytes for numbers, text and binary.
+		if sqltypes.IsIntegral(v.Type) || sqltypes.IsFloat(v.Type) || sqltypes.IsText(v.Type) || sqltypes.IsBinary(v.Type) {
+			return string(v.Value), QROK
+		}
 	}
 	return "", QRMismatch
 }
@@ -898,6 +1046,37 @@ func buildBindVarCondition(bvc interface{}) (name string, onAbsent, onMismatch b
 			return
 		}
 		value = strvalue
+	} else if op == QRIn || op == QRNotIn {
+		kr, ok := v.(map[string]interface{})
+		if !ok {
+			err = vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "want keyrange for Value")
+			return
+		}
+		keyrange := &topodatapb.KeyRange{}
+		strstart, ok := kr["Start"]
+		if !ok {
+			err = vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "Start missing in KeyRange")
+			return
+		}
+		start, ok := strstart.(string)
+		if !ok {
+			err = vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "want string for Start")
+			return
+		}
+		keyrange.Start = []byte(start)
+
+		strend, ok := kr["End"]
+		if !ok {
+			err = vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "End missing in KeyRange")
+			return
+		}
+		end, ok := strend.(string)
+		if !ok {
+			err = vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "want string for End")
+			return
+		}
+		keyrange.End = []byte(end)
+		value = keyrange
 	}
 
 	v, ok = bvcinfo["OnMismatch"]

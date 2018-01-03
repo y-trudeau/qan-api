@@ -1,25 +1,12 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package planbuilder
 
 import (
 	"errors"
 
-	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vtgate/engine"
 	"github.com/youtube/vitess/go/vt/vtgate/vindexes"
@@ -28,7 +15,7 @@ import (
 // dmlFormatter strips out keyspace name from dmls.
 func dmlFormatter(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
 	switch node := node.(type) {
-	case sqlparser.TableName:
+	case *sqlparser.TableName:
 		node.Name.Format(buf)
 		return
 	}
@@ -37,51 +24,34 @@ func dmlFormatter(buf *sqlparser.TrackedBuffer, node sqlparser.SQLNode) {
 
 // buildUpdatePlan builds the instructions for an UPDATE statement.
 func buildUpdatePlan(upd *sqlparser.Update, vschema VSchema) (*engine.Route, error) {
-	er := &engine.Route{
+	route := &engine.Route{
 		Query: generateQuery(upd),
 	}
-	bldr, err := processTableExprs(upd.TableExprs, vschema)
+	updateTable, _ := upd.Table.Expr.(*sqlparser.TableName)
+
+	var err error
+	route.Table, err = vschema.Find(updateTable.Qualifier, updateTable.Name)
 	if err != nil {
 		return nil, err
 	}
-	rb, ok := bldr.(*route)
-	if !ok {
-		return nil, errors.New("unsupported: multi-table update statement in sharded keyspace")
-	}
-
-	er.Keyspace = rb.ERoute.Keyspace
-	if !er.Keyspace.Sharded {
-		if !validateSubquerySamePlan(upd, rb.ERoute, vschema) {
-			return nil, errors.New("unsupported: sharded subqueries in DML")
-		}
-		er.Opcode = engine.UpdateUnsharded
-		return er, nil
-	}
-
+	route.Keyspace = route.Table.Keyspace
 	if hasSubquery(upd) {
-		return nil, errors.New("unsupported: subqueries in sharded DML")
+		return nil, errors.New("unsupported: subqueries in DML")
 	}
-	if len(rb.Symtab().tables) != 1 {
-		return nil, errors.New("unsupported: multi-table update statement in sharded keyspace")
+	if !route.Keyspace.Sharded {
+		route.Opcode = engine.UpdateUnsharded
+		return route, nil
 	}
 
-	var tableName sqlparser.TableName
-	for t := range rb.Symtab().tables {
-		tableName = t
-	}
-	er.Table, err = vschema.Find(tableName)
+	err = getDMLRouting(upd.Where, route)
 	if err != nil {
 		return nil, err
 	}
-	err = getDMLRouting(upd.Where, er)
-	if err != nil {
-		return nil, err
-	}
-	er.Opcode = engine.UpdateEqual
-	if isIndexChanging(upd.Exprs, er.Table.ColumnVindexes) {
+	route.Opcode = engine.UpdateEqual
+	if isIndexChanging(upd.Exprs, route.Table.ColumnVindexes) {
 		return nil, errors.New("unsupported: DML cannot change vindex column")
 	}
-	return er, nil
+	return route, nil
 }
 
 func generateQuery(statement sqlparser.Statement) string {
@@ -105,46 +75,30 @@ func isIndexChanging(setClauses sqlparser.UpdateExprs, colVindexes []*vindexes.C
 
 // buildUpdatePlan builds the instructions for a DELETE statement.
 func buildDeletePlan(del *sqlparser.Delete, vschema VSchema) (*engine.Route, error) {
-	er := &engine.Route{
+	route := &engine.Route{
 		Query: generateQuery(del),
 	}
-	bldr, err := processTableExprs(del.TableExprs, vschema)
+	var err error
+	route.Table, err = vschema.Find(del.Table.Qualifier, del.Table.Name)
 	if err != nil {
 		return nil, err
 	}
-	rb, ok := bldr.(*route)
-	if !ok {
-		return nil, errors.New("unsupported: multi-table delete statement in sharded keyspace")
-	}
-	er.Keyspace = rb.ERoute.Keyspace
-	if !er.Keyspace.Sharded {
-		if !validateSubquerySamePlan(del, rb.ERoute, vschema) {
-			return nil, errors.New("unsupported: sharded subqueries in DML")
-		}
-		er.Opcode = engine.DeleteUnsharded
-		return er, nil
-	}
-	if del.Targets != nil || len(rb.Symtab().tables) != 1 {
-		return nil, errors.New("unsupported: multi-table delete statement in sharded keyspace")
-	}
+	route.Keyspace = route.Table.Keyspace
 	if hasSubquery(del) {
-		return nil, errors.New("unsupported: subqueries in sharded DML")
+		return nil, errors.New("unsupported: subqueries in DML")
 	}
-	var tableName sqlparser.TableName
-	for t := range rb.Symtab().tables {
-		tableName = t
+	if !route.Keyspace.Sharded {
+		route.Opcode = engine.DeleteUnsharded
+		return route, nil
 	}
-	er.Table, err = vschema.Find(tableName)
+
+	err = getDMLRouting(del.Where, route)
 	if err != nil {
 		return nil, err
 	}
-	err = getDMLRouting(del.Where, er)
-	if err != nil {
-		return nil, err
-	}
-	er.Opcode = engine.DeleteEqual
-	er.Subquery = generateDeleteSubquery(del, er.Table)
-	return er, nil
+	route.Opcode = engine.DeleteEqual
+	route.Subquery = generateDeleteSubquery(del, route.Table)
+	return route, nil
 }
 
 // generateDeleteSubquery generates the query to fetch the rows
@@ -175,9 +129,9 @@ func getDMLRouting(where *sqlparser.Where, route *engine.Route) error {
 		if !vindexes.IsUnique(index.Vindex) {
 			continue
 		}
-		if pv, ok := getMatch(where.Expr, index.Column); ok {
+		if values := getMatch(where.Expr, index.Column); values != nil {
 			route.Vindex = index.Vindex
-			route.Values = []sqltypes.PlanValue{pv}
+			route.Values = values
 			return nil
 		}
 	}
@@ -187,7 +141,7 @@ func getDMLRouting(where *sqlparser.Where, route *engine.Route) error {
 // getMatch returns the matched value if there is an equality
 // constraint on the specified column that can be used to
 // decide on a route.
-func getMatch(node sqlparser.Expr, col sqlparser.ColIdent) (pv sqltypes.PlanValue, ok bool) {
+func getMatch(node sqlparser.Expr, col sqlparser.ColIdent) interface{} {
 	filters := splitAndExpression(nil, node)
 	for _, filter := range filters {
 		comparison, ok := filter.(*sqlparser.ComparisonExpr)
@@ -203,13 +157,13 @@ func getMatch(node sqlparser.Expr, col sqlparser.ColIdent) (pv sqltypes.PlanValu
 		if !sqlparser.IsValue(comparison.Right) {
 			continue
 		}
-		pv, err := sqlparser.NewPlanValue(comparison.Right)
+		val, err := valConvert(comparison.Right)
 		if err != nil {
 			continue
 		}
-		return pv, true
+		return val
 	}
-	return sqltypes.PlanValue{}, false
+	return nil
 }
 
 func nameMatch(node sqlparser.Expr, col sqlparser.ColIdent) bool {

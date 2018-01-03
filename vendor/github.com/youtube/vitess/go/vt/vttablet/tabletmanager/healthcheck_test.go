@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletmanager
 
@@ -32,11 +20,10 @@ import (
 	"github.com/youtube/vitess/go/vt/binlog/binlogplayer"
 	"github.com/youtube/vitess/go/vt/health"
 	"github.com/youtube/vitess/go/vt/mysqlctl"
-	"github.com/youtube/vitess/go/vt/topo"
-	"github.com/youtube/vitess/go/vt/topo/memorytopo"
-	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletservermock"
+	"github.com/youtube/vitess/go/vt/topo"
+	"github.com/youtube/vitess/go/vt/topo/memorytopo"
 
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 )
@@ -146,6 +133,7 @@ func createTestAgent(ctx context.Context, t *testing.T, preStart func(*ActionAge
 		PortMap: map[string]int32{
 			"vt": port,
 		},
+		Ip:       "1.0.0.1",
 		Keyspace: "test_keyspace",
 		Shard:    "0",
 		Type:     topodatapb.TabletType_REPLICA,
@@ -207,11 +195,8 @@ func TestHealthCheckControlsQueryService(t *testing.T) {
 	if ti.Type != topodatapb.TabletType_REPLICA {
 		t.Errorf("First health check failed to go to replica: %v", ti.Type)
 	}
-	if port := topoproto.MysqlPort(ti.Tablet); port != 3306 {
-		t.Errorf("First health check failed to update mysql port: %v", port)
-	}
-	if !agent.gotMysqlPort {
-		t.Errorf("Healthcheck didn't record it updated the MySQL port.")
+	if ti.PortMap["mysql"] != 3306 {
+		t.Errorf("First health check failed to update mysql port: %v", ti.PortMap["mysql"])
 	}
 	if !agent.QueryServiceControl.IsServing() {
 		t.Errorf("Query service should be running")
@@ -794,8 +779,8 @@ func TestStateChangeImmediateHealthBroadcast(t *testing.T) {
 		InsertID:     0,
 		Rows: [][]sqltypes.Value{
 			{
-				sqltypes.NewVarBinary("MariaDB/0-1-1234"),
-				sqltypes.NewVarBinary("DontStart"),
+				sqltypes.MakeString([]byte("MariaDB/0-1-1234")),
+				sqltypes.MakeString([]byte("DontStart")),
 			},
 		},
 	})

@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package mysqlctl
 
@@ -24,7 +12,6 @@ import (
 	log "github.com/golang/glog"
 	"golang.org/x/net/context"
 
-	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
 	"github.com/youtube/vitess/go/vt/mysqlctl/tmutils"
 	"github.com/youtube/vitess/go/vt/sqlparser"
@@ -60,7 +47,7 @@ func (mysqld *Mysqld) GetSchema(dbName string, tables, excludeTables []string, i
 	if len(qr.Rows) == 0 {
 		return nil, fmt.Errorf("empty create database statement for %v", dbName)
 	}
-	sd.DatabaseSchema = strings.Replace(qr.Rows[0][1].ToString(), backtickDBName, "{{.DatabaseName}}", 1)
+	sd.DatabaseSchema = strings.Replace(qr.Rows[0][1].String(), backtickDBName, "{{.DatabaseName}}", 1)
 
 	// get the list of tables we're interested in
 	sql := "SELECT table_name, table_type, data_length, table_rows FROM information_schema.tables WHERE table_schema = '" + dbName + "'"
@@ -77,14 +64,14 @@ func (mysqld *Mysqld) GetSchema(dbName string, tables, excludeTables []string, i
 
 	sd.TableDefinitions = make([]*tabletmanagerdatapb.TableDefinition, 0, len(qr.Rows))
 	for _, row := range qr.Rows {
-		tableName := row[0].ToString()
-		tableType := row[1].ToString()
+		tableName := row[0].String()
+		tableType := row[1].String()
 
 		// compute dataLength
 		var dataLength uint64
 		if !row[2].IsNull() {
 			// dataLength is NULL for views, then we use 0
-			dataLength, err = sqltypes.ToUint64(row[2])
+			dataLength, err = row[2].ParseUint64()
 			if err != nil {
 				return nil, err
 			}
@@ -93,7 +80,7 @@ func (mysqld *Mysqld) GetSchema(dbName string, tables, excludeTables []string, i
 		// get row count
 		var rowCount uint64
 		if !row[3].IsNull() {
-			rowCount, err = sqltypes.ToUint64(row[3])
+			rowCount, err = row[3].ParseUint64()
 			if err != nil {
 				return nil, err
 			}
@@ -110,7 +97,7 @@ func (mysqld *Mysqld) GetSchema(dbName string, tables, excludeTables []string, i
 		// Normalize & remove auto_increment because it changes on every insert
 		// FIXME(alainjobart) find a way to share this with
 		// vt/tabletserver/table_info.go:162
-		norm := qr.Rows[0][1].ToString()
+		norm := qr.Rows[0][1].String()
 		norm = autoIncr.ReplaceAllLiteralString(norm, "")
 		if tableType == tmutils.TableView {
 			// Views will have the dbname in there, replace it
@@ -209,12 +196,12 @@ func (mysqld *Mysqld) GetPrimaryKeyColumns(dbName, table string) ([]string, erro
 	var expectedIndex int64 = 1
 	for _, row := range qr.Rows {
 		// skip non-primary keys
-		if row[keyNameIndex].ToString() != "PRIMARY" {
+		if row[keyNameIndex].String() != "PRIMARY" {
 			continue
 		}
 
 		// check the Seq_in_index is always increasing
-		seqInIndex, err := sqltypes.ToInt64(row[seqInIndexIndex])
+		seqInIndex, err := row[seqInIndexIndex].ParseInt64()
 		if err != nil {
 			return nil, err
 		}
@@ -223,7 +210,7 @@ func (mysqld *Mysqld) GetPrimaryKeyColumns(dbName, table string) ([]string, erro
 		}
 		expectedIndex++
 
-		columns = append(columns, row[columnNameIndex].ToString())
+		columns = append(columns, row[columnNameIndex].String())
 	}
 	return columns, err
 }

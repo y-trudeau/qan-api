@@ -1,41 +1,24 @@
-/*
- * Copyright 2017 Google Inc.
- * 
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * 
- *     http://www.apache.org/licenses/LICENSE-2.0
- * 
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package io.vitess.jdbc;
 
-import java.lang.reflect.Field;
+import com.google.common.util.concurrent.Futures;
+import io.vitess.client.Context;
+import io.vitess.client.SQLFuture;
+import io.vitess.client.VTGateTx;
+import io.vitess.proto.Query;
+import io.vitess.proto.Topodata;
+import io.vitess.util.Constants;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 import org.junit.Assert;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.mockito.Matchers;
 import org.powermock.api.mockito.PowerMockito;
-import org.powermock.modules.junit4.PowerMockRunner;
-
-import io.vitess.client.VTSession;
-import io.vitess.proto.Query;
-import io.vitess.proto.Topodata;
-import io.vitess.util.Constants;
 
 /**
  * Created by harshit.gangal on 19/01/16.
  */
-@RunWith(PowerMockRunner.class)
 public class VitessConnectionTest extends BaseTest {
 
     @Test public void testVitessConnection() throws SQLException {
@@ -120,60 +103,81 @@ public class VitessConnectionTest extends BaseTest {
     }
 
     @Test public void testCommit() throws SQLException {
-        VTSession mockSession = PowerMockito.mock(VTSession.class);
         VitessConnection vitessConnection = getVitessConnection();
-        try {
-            Field privateVTSessionField = VitessConnection.class.getDeclaredField("vtSession");
-            privateVTSessionField.setAccessible(true);
-            privateVTSessionField.set(vitessConnection, mockSession);
-            PowerMockito.when(mockSession.isInTransaction()).thenReturn(false);
-            PowerMockito.when(mockSession.isAutoCommit()).thenReturn(false);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            Assert.fail(e.getMessage());
-        }
+        vitessConnection.setAutoCommit(false);
+        VTGateTx mockVtGateTx = PowerMockito.mock(VTGateTx.class);
+        vitessConnection.setVtGateTx(mockVtGateTx);
+        SQLFuture<Void> v = new SQLFuture<>(Futures.<Void>immediateFuture(null));
+        PowerMockito.when(mockVtGateTx.commit(Matchers.any(Context.class), Matchers.anyBoolean()))
+            .thenReturn(v);
         vitessConnection.commit();
+        Assert.assertEquals(null, vitessConnection.getVtGateTx());
     }
 
     @Test(expected = SQLException.class) public void testCommitForException() throws SQLException {
         VitessConnection vitessConnection = getVitessConnection();
-        vitessConnection.setAutoCommit(true);
-        vitessConnection.commit();
+        vitessConnection.setAutoCommit(false);
+        VTGateTx mockVtGateTx = PowerMockito.mock(VTGateTx.class);
+        vitessConnection.setVtGateTx(mockVtGateTx);
+        PowerMockito.when(mockVtGateTx.commit(Matchers.any(Context.class), Matchers.anyBoolean()))
+            .thenThrow(new SQLException());
+        try {
+            vitessConnection.commit();
+        } catch (SQLException e) {
+            throw new SQLException();
+        }
     }
 
     @Test public void testRollback() throws SQLException {
         VitessConnection vitessConnection = getVitessConnection();
         vitessConnection.setAutoCommit(false);
-        vitessConnection.rollback();
+        VTGateTx mockVtGateTx = PowerMockito.mock(VTGateTx.class);
+        vitessConnection.setVtGateTx(mockVtGateTx);
+        SQLFuture<Void> v = new SQLFuture<>(Futures.<Void>immediateFuture(null));
+        PowerMockito.when(mockVtGateTx.commit(Matchers.any(Context.class), Matchers.anyBoolean()))
+            .thenReturn(v);
+        vitessConnection.commit();
+        Assert.assertEquals(null, vitessConnection.getVtGateTx());
     }
 
     @Test(expected = SQLException.class) public void testRollbackForException()
         throws SQLException {
         VitessConnection vitessConnection = getVitessConnection();
-        vitessConnection.setAutoCommit(true);
-        vitessConnection.rollback();
+        vitessConnection.setAutoCommit(false);
+        VTGateTx mockVtGateTx = PowerMockito.mock(VTGateTx.class);
+        vitessConnection.setVtGateTx(mockVtGateTx);
+        PowerMockito.when(mockVtGateTx.rollback(Matchers.any(Context.class)))
+            .thenThrow(new SQLException());
+        try {
+            vitessConnection.rollback();
+        } catch (SQLException e) {
+            throw new SQLException();
+        }
     }
 
     @Test public void testClosed() throws SQLException {
         VitessConnection vitessConnection = getVitessConnection();
         vitessConnection.setAutoCommit(false);
+        VTGateTx mockVtGateTx = PowerMockito.mock(VTGateTx.class);
+        vitessConnection.setVtGateTx(mockVtGateTx);
+        SQLFuture<Void> v = new SQLFuture<>(Futures.<Void>immediateFuture(null));
+        PowerMockito.when(mockVtGateTx.rollback(Matchers.any(Context.class))).thenReturn(v);
         vitessConnection.close();
         Assert.assertEquals(true, vitessConnection.isClosed());
     }
 
     @Test(expected = SQLException.class) public void testClosedForException() throws SQLException {
-        VTSession mockSession = PowerMockito.mock(VTSession.class);
         VitessConnection vitessConnection = getVitessConnection();
+        vitessConnection.setAutoCommit(false);
+        VTGateTx mockVtGateTx = PowerMockito.mock(VTGateTx.class);
+        vitessConnection.setVtGateTx(mockVtGateTx);
+        PowerMockito.when(mockVtGateTx.rollback(Matchers.any(Context.class)))
+            .thenThrow(new SQLException());
         try {
-            Field privateVTSessionField = VitessConnection.class.getDeclaredField("vtSession");
-            privateVTSessionField.setAccessible(true);
-            privateVTSessionField.set(vitessConnection, mockSession);
-            //vtSession.setSession(mockSession.getSession());
-            PowerMockito.when(mockSession.isInTransaction()).thenReturn(true);
-            PowerMockito.when(mockSession.isAutoCommit()).thenReturn(true);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            Assert.fail(e.getMessage());
+            vitessConnection.rollback();
+        } catch (SQLException e) {
+            throw new SQLException();
         }
-        vitessConnection.close();
     }
 
     @Test public void testGetCatalog() throws SQLException {

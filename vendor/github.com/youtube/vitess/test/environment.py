@@ -1,19 +1,4 @@
 #!/usr/bin/env python
-
-# Copyright 2017 Google Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """Initialize the test environment."""
 
 import logging
@@ -26,6 +11,7 @@ import protocols_flavor
 # Import the topo implementations that you want registered as options for the
 # --topo-server-flavor flag.
 # pylint: disable=unused-import
+import topo_flavor.zookeeper
 import topo_flavor.zk2
 import topo_flavor.etcd
 import topo_flavor.etcd2
@@ -96,9 +82,6 @@ run_local_database = os.path.join(vtroot, 'py-vtdb', 'vttest',
 # url to hit to force the logs to flush.
 flush_logs_url = '/debug/flushlogs'
 
-# set the maximum size for grpc messages to be 5MB (larger than the default of
-# 4MB).
-grpc_max_message_size = 5 * 1024 * 1024
 
 def setup():
   try:

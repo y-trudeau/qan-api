@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package gateway
 
@@ -39,7 +27,6 @@ import (
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
-	"github.com/youtube/vitess/go/vt/topo/topoproto"
 )
 
 var (
@@ -47,7 +34,6 @@ var (
 	tabletFilters       flagutil.StringListValue
 	refreshInterval     = flag.Duration("tablet_refresh_interval", 1*time.Minute, "tablet refresh interval")
 	topoReadConcurrency = flag.Int("topo_read_concurrency", 32, "concurrent topo reads")
-	allowedTabletTypes  []topodatapb.TabletType
 )
 
 const (
@@ -56,7 +42,6 @@ const (
 
 func init() {
 	flag.Var(&tabletFilters, "tablet_filters", "Specifies a comma-separated list of 'keyspace|shard_name or keyrange' values to filter the tablets to watch")
-	topoproto.TabletTypeListVar(&allowedTabletTypes, "allowed_tablet_types", "Specifies the tablet types this vtgate is allowed to route queries to")
 	RegisterCreator(gatewayImplementationDiscovery, createDiscoveryGateway)
 }
 
@@ -180,19 +165,6 @@ func (dg *discoveryGateway) withRetry(ctx context.Context, target *querypb.Targe
 	var tabletLastUsed *topodatapb.Tablet
 	var err error
 	invalidTablets := make(map[string]bool)
-
-	if len(allowedTabletTypes) > 0 {
-		var match bool
-		for _, allowed := range allowedTabletTypes {
-			if allowed == target.TabletType {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION, "requested tablet type %v is not part of the allowed tablet types for this vtgate: %+v", target.TabletType.String(), allowedTabletTypes)
-		}
-	}
 
 	bufferedOnce := false
 	for i := 0; i < dg.retryCount+1; i++ {

@@ -1,20 +1,5 @@
 #!/usr/bin/env python
 
-# Copyright 2017 Google Inc.
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-
 """Common import for all tests."""
 
 import base64
@@ -586,7 +571,6 @@ class VtGate(object):
 
     if protocols_flavor().vtgate_protocol() == 'grpc':
       args.extend(['-grpc_port', str(self.grpc_port)])
-      args.extend(['-grpc_max_message_size', str(environment.grpc_max_message_size)])
     if protocols_flavor().service_map():
       args.extend(['-service_map', ','.join(protocols_flavor().service_map())])
     if topo_impl:
@@ -702,17 +686,16 @@ class VtGate(object):
     protocol, addr = self.rpc_endpoint()
     args = environment.binary_args('vtclient') + [
         '-server', addr,
+        '-tablet_type', tablet_type,
         '-vtgate_protocol', protocol]
     if json_output:
       args.append('-json')
+    if keyspace:
+      args.extend(['-keyspace', keyspace])
     if bindvars:
       args.extend(['-bind_variables', json.dumps(bindvars)])
     if streaming:
       args.append('-streaming')
-    if keyspace:
-      args.extend(['-target', '%s@%s' % (keyspace, tablet_type)])
-    else:
-      args.extend(['-target', '@'+tablet_type])
     if verbose:
       args.append('-alsologtostderr')
     args.append(sql)
@@ -738,7 +721,7 @@ class VtGate(object):
     _, addr = self.rpc_endpoint()
     args = ['VtGateExecute', '-json',
             '-server', addr,
-            '-target', '@'+tablet_type]
+            '-tablet_type', tablet_type]
     if bindvars:
       args.extend(['-bind_variables', json.dumps(bindvars)])
     if execute_options:
@@ -1149,13 +1132,13 @@ def check_srv_keyspace(cell, keyspace, expected, keyspace_id_type='uint64',
     for shard in partition['shard_references']:
       s = ''
       e = ''
-      if 'key_range' in shard and shard['key_range']:
+      if 'key_range' in shard:
         if 'start' in shard['key_range']:
           s = shard['key_range']['start']
-          s = base64.b64decode(s).encode('hex') if s else ''
+          s = base64.b64decode(s).encode('hex')
         if 'end' in shard['key_range']:
           e = shard['key_range']['end']
-          e = base64.b64decode(e).encode('hex') if e else ''
+          e = base64.b64decode(e).encode('hex')
       r += ' %s-%s' % (s, e)
     pmap[tablet_type] = r + '\n'
   for tablet_type in sorted(pmap):

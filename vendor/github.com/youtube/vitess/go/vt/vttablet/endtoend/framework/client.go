@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package framework
 
@@ -22,6 +10,7 @@ import (
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/callerid"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver"
+	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/querytypes"
 	"golang.org/x/net/context"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
@@ -52,25 +41,12 @@ func NewClient() *QueryClient {
 	}
 }
 
-// NewClientWithContext creates a new client for Server with the provided context.
-func NewClientWithContext(ctx context.Context) *QueryClient {
-	return &QueryClient{
-		ctx:    ctx,
-		target: Target,
-		server: Server,
-	}
-}
-
 // Begin begins a transaction.
-func (client *QueryClient) Begin(clientFoundRows bool) error {
+func (client *QueryClient) Begin() error {
 	if client.transactionID != 0 {
 		return errors.New("already in transaction")
 	}
-	var options *querypb.ExecuteOptions
-	if clientFoundRows {
-		options = &querypb.ExecuteOptions{ClientFoundRows: clientFoundRows}
-	}
-	transactionID, err := client.server.Begin(client.ctx, &client.target, options)
+	transactionID, err := client.server.Begin(client.ctx, &client.target)
 	if err != nil {
 		return err
 	}
@@ -140,31 +116,12 @@ func (client *QueryClient) SetServingType(tabletType topodatapb.TabletType) erro
 }
 
 // Execute executes a query.
-func (client *QueryClient) Execute(query string, bindvars map[string]*querypb.BindVariable) (*sqltypes.Result, error) {
+func (client *QueryClient) Execute(query string, bindvars map[string]interface{}) (*sqltypes.Result, error) {
 	return client.ExecuteWithOptions(query, bindvars, &querypb.ExecuteOptions{IncludedFields: querypb.ExecuteOptions_ALL})
 }
 
-// BeginExecute performs a BeginExecute.
-func (client *QueryClient) BeginExecute(query string, bindvars map[string]*querypb.BindVariable) (*sqltypes.Result, error) {
-	if client.transactionID != 0 {
-		return nil, errors.New("already in transaction")
-	}
-	qr, transactionID, err := client.server.BeginExecute(
-		client.ctx,
-		&client.target,
-		query,
-		bindvars,
-		&querypb.ExecuteOptions{IncludedFields: querypb.ExecuteOptions_ALL},
-	)
-	if err != nil {
-		return nil, err
-	}
-	client.transactionID = transactionID
-	return qr, nil
-}
-
 // ExecuteWithOptions executes a query using 'options'.
-func (client *QueryClient) ExecuteWithOptions(query string, bindvars map[string]*querypb.BindVariable, options *querypb.ExecuteOptions) (*sqltypes.Result, error) {
+func (client *QueryClient) ExecuteWithOptions(query string, bindvars map[string]interface{}, options *querypb.ExecuteOptions) (*sqltypes.Result, error) {
 	return client.server.Execute(
 		client.ctx,
 		&client.target,
@@ -176,12 +133,12 @@ func (client *QueryClient) ExecuteWithOptions(query string, bindvars map[string]
 }
 
 // StreamExecute executes a query & returns the results.
-func (client *QueryClient) StreamExecute(query string, bindvars map[string]*querypb.BindVariable) (*sqltypes.Result, error) {
+func (client *QueryClient) StreamExecute(query string, bindvars map[string]interface{}) (*sqltypes.Result, error) {
 	return client.StreamExecuteWithOptions(query, bindvars, &querypb.ExecuteOptions{IncludedFields: querypb.ExecuteOptions_ALL})
 }
 
 // StreamExecuteWithOptions executes a query & returns the results using 'options'.
-func (client *QueryClient) StreamExecuteWithOptions(query string, bindvars map[string]*querypb.BindVariable, options *querypb.ExecuteOptions) (*sqltypes.Result, error) {
+func (client *QueryClient) StreamExecuteWithOptions(query string, bindvars map[string]interface{}, options *querypb.ExecuteOptions) (*sqltypes.Result, error) {
 	result := &sqltypes.Result{}
 	err := client.server.StreamExecute(
 		client.ctx,
@@ -205,7 +162,7 @@ func (client *QueryClient) StreamExecuteWithOptions(query string, bindvars map[s
 }
 
 // Stream streams the results of a query.
-func (client *QueryClient) Stream(query string, bindvars map[string]*querypb.BindVariable, sendFunc func(*sqltypes.Result) error) error {
+func (client *QueryClient) Stream(query string, bindvars map[string]interface{}, sendFunc func(*sqltypes.Result) error) error {
 	return client.server.StreamExecute(
 		client.ctx,
 		&client.target,
@@ -217,7 +174,7 @@ func (client *QueryClient) Stream(query string, bindvars map[string]*querypb.Bin
 }
 
 // ExecuteBatch executes a batch of queries.
-func (client *QueryClient) ExecuteBatch(queries []*querypb.BoundQuery, asTransaction bool) ([]sqltypes.Result, error) {
+func (client *QueryClient) ExecuteBatch(queries []querytypes.BoundQuery, asTransaction bool) ([]sqltypes.Result, error) {
 	return client.server.ExecuteBatch(
 		client.ctx,
 		&client.target,

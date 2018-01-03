@@ -1,36 +1,22 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package planbuilder
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	"github.com/youtube/vitess/go/sqltypes"
-	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/tableacl"
-	"github.com/youtube/vitess/go/vt/vterrors"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
 )
 
 var (
 	// ErrTooComplex indicates given sql query is too complex.
-	ErrTooComplex = vterrors.New(vtrpcpb.Code_INVALID_ARGUMENT, "Complex")
+	ErrTooComplex = errors.New("Complex")
 	execLimit     = &sqlparser.Limit{Rowcount: sqlparser.NewValArg([]byte(":#maxLimit"))}
 )
 
@@ -45,43 +31,39 @@ const (
 	PlanPassSelect PlanType = iota
 	// PlanSelectLock is for a select that locks.
 	PlanSelectLock
-	// PlanNextval is for NEXTVAL.
+	// PlanNextval is for NEXTVAL
 	PlanNextval
 	// PlanPassDML is pass through update & delete statements. This is
 	// the default plan for update and delete statements.
 	PlanPassDML
 	// PlanDMLPK is an update or delete with an equality where clause(s)
-	// on primary key(s).
+	// on primary key(s)
 	PlanDMLPK
 	// PlanDMLSubquery is an update or delete with a subselect statement
 	PlanDMLSubquery
 	// PlanInsertPK is insert statement where the PK value is
-	// supplied with the query.
+	// supplied with the query
 	PlanInsertPK
-	// PlanInsertSubquery is same as PlanDMLSubquery but for inserts.
+	// PlanInsertSubquery is same as PlanDMLSubquery but for inserts
 	PlanInsertSubquery
-	// PlanUpsertPK is for insert ... on duplicate key constructs.
+	// PlanUpsertPK is for insert ... on duplicate key constructs
 	PlanUpsertPK
-	// PlanInsertMessage is for inserting into message tables.
+	// PlanInsertMessage is for inserting into message tables
 	PlanInsertMessage
-	// PlanSet is for SET statements.
+	// PlanSet is for SET statements
 	PlanSet
-	// PlanDDL is for DDL statements.
+	// PlanDDL is for DDL statements
 	PlanDDL
-	// PlanSelectStream is used for streaming queries.
+	// PlanSelectStream is used for streaming queries
 	PlanSelectStream
-	// PlanOtherRead is for SHOW, DESCRIBE & EXPLAIN statements.
-	PlanOtherRead
-	// PlanOtherAdmin is for REPAIR, OPTIMIZE and TRUNCATE statements.
-	PlanOtherAdmin
-	// PlanMessageStream is used for streaming messages.
-	PlanMessageStream
+	// PlanOther is for SHOW, DESCRIBE & EXPLAIN statements
+	PlanOther
 	// NumPlans stores the total number of plans
 	NumPlans
 )
 
 // Must exactly match order of plan constants.
-var planName = [NumPlans]string{
+var planName = []string{
 	"PASS_SELECT",
 	"SELECT_LOCK",
 	"NEXTVAL",
@@ -95,9 +77,7 @@ var planName = [NumPlans]string{
 	"SET",
 	"DDL",
 	"SELECT_STREAM",
-	"OTHER_READ",
-	"OTHER_ADMIN",
-	"MESSAGE_STREAM",
+	"OTHER",
 }
 
 func (pt PlanType) String() string {
@@ -143,14 +123,11 @@ var tableACLRoles = map[PlanType]tableacl.Role{
 	PlanDMLSubquery:    tableacl.WRITER,
 	PlanInsertPK:       tableacl.WRITER,
 	PlanInsertSubquery: tableacl.WRITER,
-	PlanInsertMessage:  tableacl.WRITER,
 	PlanDDL:            tableacl.ADMIN,
 	PlanSelectStream:   tableacl.READER,
-	PlanOtherRead:      tableacl.READER,
-	PlanOtherAdmin:     tableacl.ADMIN,
+	PlanOther:          tableacl.ADMIN,
 	PlanUpsertPK:       tableacl.WRITER,
 	PlanNextval:        tableacl.WRITER,
-	PlanMessageStream:  tableacl.WRITER,
 }
 
 //_______________________________________________
@@ -165,24 +142,19 @@ const (
 	ReasonTableNoIndex
 	ReasonPKChange
 	ReasonComplexExpr
-	ReasonUpsertSubquery
-	ReasonUpsertMultiRow
-	ReasonReplace
-	ReasonMultiTable
-	NumReasons
+	ReasonUpsert
+	ReasonUpsertColMismatch
 )
 
 // Must exactly match order of reason constants.
-var reasonName = [NumReasons]string{
+var reasonName = []string{
 	"DEFAULT",
 	"TABLE",
 	"TABLE_NOINDEX",
 	"PK_CHANGE",
 	"COMPLEX_EXPR",
-	"UPSERT_SUBQUERY",
-	"UPSERT_MULTI_ROW",
-	"REPLACE",
-	"MULTI_TABLE",
+	"UPSERT",
+	"UPSERT_COL_MISMATCH",
 }
 
 // String returns a string representation of a ReasonType.
@@ -197,13 +169,21 @@ func (rt ReasonType) MarshalJSON() ([]byte, error) {
 
 //_______________________________________________
 
+// MessageRowValues is used to store the values
+// of a message row in a plan.
+type MessageRowValues struct {
+	TimeNext interface{}
+	ID       interface{}
+	Message  interface{}
+}
+
+//_______________________________________________
+
 // Plan is built for selects and DMLs.
 type Plan struct {
 	PlanID PlanType
 	Reason ReasonType
 	Table  *schema.Table
-	// NewName is the new name of the table. Set for DDLs which create or change the table.
-	NewName sqlparser.TableIdent
 
 	// FieldQuery is used to fetch field info
 	FieldQuery *sqlparser.ParsedQuery
@@ -226,10 +206,10 @@ type Plan struct {
 	// PlanDMLPK: where clause values.
 	// PlanInsertPK: values clause.
 	// PlanNextVal: increment.
-	PKValues []sqltypes.PlanValue
+	PKValues []interface{}
 
 	// For update: set clause if pk is changing.
-	SecondaryPKValues []sqltypes.PlanValue
+	SecondaryPKValues []interface{}
 
 	// WhereClause is set for DMLs. It is used by the hot row protection
 	// to serialize e.g. UPDATEs going to the same row.
@@ -237,6 +217,9 @@ type Plan struct {
 
 	// For PlanInsertSubquery: pk columns in the subquery result.
 	SubqueryPKColumns []int
+
+	// For PlanInsertMessage. Query used to reload inserted messages.
+	MessageReloaderQuery *sqlparser.ParsedQuery
 }
 
 // TableName returns the table name for the plan.
@@ -250,13 +233,13 @@ func (plan *Plan) TableName() sqlparser.TableIdent {
 
 func (plan *Plan) setTable(tableName sqlparser.TableIdent, tables map[string]*schema.Table) (*schema.Table, error) {
 	if plan.Table = tables[tableName.String()]; plan.Table == nil {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "table %s not found in schema", tableName)
+		return nil, fmt.Errorf("table %s not found in schema", tableName)
 	}
 	return plan.Table, nil
 }
 
 // Build builds a plan based on the schema.
-func Build(sql string, tables map[string]*schema.Table) (*Plan, error) {
+func Build(sql string, tables map[string]*schema.Table) (plan *Plan, err error) {
 	statement, err := sqlparser.Parse(sql)
 	if err != nil {
 		return nil, err
@@ -281,24 +264,21 @@ func Build(sql string, tables map[string]*schema.Table) (*Plan, error) {
 	case *sqlparser.DDL:
 		return analyzeDDL(stmt, tables), nil
 	case *sqlparser.Show:
-		return &Plan{PlanID: PlanOtherRead}, nil
-	case *sqlparser.OtherRead:
-		return &Plan{PlanID: PlanOtherRead}, nil
-	case *sqlparser.OtherAdmin:
-		return &Plan{PlanID: PlanOtherAdmin}, nil
+		return &Plan{PlanID: PlanOther}, nil
+	case *sqlparser.Other:
+		return &Plan{PlanID: PlanOther}, nil
 	}
-
-	return nil, vterrors.New(vtrpcpb.Code_INVALID_ARGUMENT, "invalid SQL")
+	return nil, errors.New("invalid SQL")
 }
 
 // BuildStreaming builds a streaming plan based on the schema.
-func BuildStreaming(sql string, tables map[string]*schema.Table) (*Plan, error) {
+func BuildStreaming(sql string, tables map[string]*schema.Table) (plan *Plan, err error) {
 	statement, err := sqlparser.Parse(sql)
 	if err != nil {
 		return nil, err
 	}
 
-	plan := &Plan{
+	plan = &Plan{
 		PlanID:    PlanSelectStream,
 		FullQuery: GenerateFullQuery(statement),
 	}
@@ -306,31 +286,16 @@ func BuildStreaming(sql string, tables map[string]*schema.Table) (*Plan, error) 
 	switch stmt := statement.(type) {
 	case *sqlparser.Select:
 		if stmt.Lock != "" {
-			return nil, vterrors.New(vtrpcpb.Code_FAILED_PRECONDITION, "select with lock not allowed for streaming")
+			return nil, errors.New("select with lock not allowed for streaming")
 		}
 		if tableName := analyzeFrom(stmt.From); !tableName.IsEmpty() {
 			plan.setTable(tableName, tables)
 		}
-	case *sqlparser.OtherRead, *sqlparser.Show, *sqlparser.Union:
+	case *sqlparser.Union:
 		// pass
 	default:
-		return nil, vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION, "'%v' not allowed for streaming", sqlparser.String(stmt))
+		return nil, fmt.Errorf("'%v' not allowed for streaming", sqlparser.String(stmt))
 	}
 
-	return plan, nil
-}
-
-// BuildMessageStreaming builds a plan for message streaming.
-func BuildMessageStreaming(name string, tables map[string]*schema.Table) (*Plan, error) {
-	plan := &Plan{
-		PlanID: PlanMessageStream,
-		Table:  tables[name],
-	}
-	if plan.Table == nil {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "table %s not found in schema", name)
-	}
-	if plan.Table.Type != schema.Message {
-		return nil, vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION, "'%s' is not a message table", name)
-	}
 	return plan, nil
 }

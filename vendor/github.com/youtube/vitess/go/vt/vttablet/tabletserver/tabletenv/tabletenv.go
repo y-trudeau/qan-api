@@ -1,35 +1,22 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 // Package tabletenv maintains environment variables and types that
 // are common for all packages of tabletserver.
 package tabletenv
 
 import (
+	"context"
 	"time"
 
 	log "github.com/golang/glog"
-	"golang.org/x/net/context"
 
 	"github.com/youtube/vitess/go/stats"
 	"github.com/youtube/vitess/go/tb"
 	"github.com/youtube/vitess/go/vt/callerid"
-	"github.com/youtube/vitess/go/vt/sqlparser"
-
 	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
+	"github.com/youtube/vitess/go/vt/sqlparser"
 )
 
 var (
@@ -65,9 +52,7 @@ var (
 		vtrpcpb.Code_DATA_LOSS.String(),
 	)
 	// InternalErrors shows number of errors from internal components.
-	InternalErrors = stats.NewCounters("InternalErrors", "Task", "StrayTransactions", "Panic", "HungQuery", "Schema", "TwopcCommit", "TwopcResurrection", "WatchdogFail", "Messages")
-	// Warnings shows number of warnings
-	Warnings = stats.NewCounters("Warnings", "ResultsExceeded")
+	InternalErrors = stats.NewCounters("InternalErrors", "Task", "StrayTransactions", "Panic", "HungQuery", "Schema", "TwopcCommit", "TwopcResurrection", "WatchdogFail")
 	// Unresolved tracks unresolved items. For now it's just Prepares.
 	Unresolved = stats.NewCounters("Unresolved", "Prepares")
 	// UserTableQueryCount shows number of queries received for each CallerID/table combination.
@@ -86,12 +71,6 @@ var (
 	TableaclDenied = stats.NewMultiCounters("TableACLDenied", []string{"TableName", "TableGroup", "PlanID", "Username"})
 	// TableaclPseudoDenied tracks the number of pseudo denies.
 	TableaclPseudoDenied = stats.NewMultiCounters("TableACLPseudoDenied", []string{"TableName", "TableGroup", "PlanID", "Username"})
-	// Infof can be overridden during tests
-	Infof = log.Infof
-	// Warningf can be overridden during tests
-	Warningf = log.Warningf
-	// Errorf can be overridden during tests
-	Errorf = log.Errorf
 )
 
 // RecordUserQuery records the query data against the user.

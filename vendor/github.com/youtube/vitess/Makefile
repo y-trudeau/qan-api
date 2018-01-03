@@ -1,16 +1,6 @@
-# Copyright 2017 Google Inc.
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright 2012, Google Inc. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can
+# be found in the LICENSE file.
 
 MAKEFLAGS = -s
 
@@ -20,7 +10,7 @@ MAKEFLAGS = -s
 
 .PHONY: all build build_web test clean unit_test unit_test_cover unit_test_race integration_test proto proto_banner site_test site_integration_test docker_bootstrap docker_test docker_unit_test java_test php_test reshard_tests
 
-all: build
+all: build test
 
 # Set a custom value for -p, the number of packages to be built/tested in parallel.
 # This is currently only used by our Travis CI test configuration.
@@ -46,7 +36,7 @@ build:
 ifndef NOBANNER
 	echo $$(date): Building source tree
 endif
-	go install $(VT_GO_PARALLEL) -ldflags "$(shell tools/build_version_flags.sh)" ./go/...
+	go install $(VT_GO_PARALLEL) -ldflags "$(tools/build_version_flags.sh)" ./go/...
 
 parser:
 	make -C go/vt/sqlparser
@@ -80,10 +70,6 @@ unit_test: build
 unit_test_cover: build
 	go test $(VT_GO_PARALLEL) -cover ./go/... | misc/parse_cover.py
 
-# TODO(mberlin): This is currently disabled in test/config.json for automatic
-# runs on Travis (manual=false). Re-enable it there once we switched the Travis
-# tests to using Docker and we verified that this is no longer flaky e.g. in
-# doubt increase timeouts in all tests.
 unit_test_race: build
 	tools/unit_test_race.sh
 
@@ -162,9 +148,6 @@ php_proto:
 	docker cp vitess_php-proto:/vt/src/github.com/youtube/vitess/php/src/Vitess/Proto/. php/src/Vitess/Proto/
 	docker rm vitess_php-proto
 
-# Helper targets for building Docker images.
-# Please read docker/README.md to understand the different available images.
-
 # This rule builds the bootstrap images for all flavors.
 DOCKER_IMAGES_FOR_TEST = mariadb mysql56 mysql57 percona percona57
 DOCKER_IMAGES = common $(DOCKER_IMAGES_FOR_TEST)
@@ -181,44 +164,44 @@ docker_bootstrap_push:
 docker_bootstrap_pull:
 	for i in $(DOCKER_IMAGES); do echo "pulling bootstrap image: $$i"; docker pull vitess/bootstrap:$$i || exit 1; done
 
+# Note: The default base and lite images (tag "latest") use MySQL 5.7.
+# Images with other MySQL/MariaDB versions get their own tag e.g. "mariadb".
+# We never push the non-"latest" tags though and only provide them for convenience for users who want to run something else than MySQL 5.7.
 docker_base:
 	# Fix permissions before copying files, to avoid AUFS bug.
 	chmod -R o=g *
-	docker build -f docker/base/Dockerfile -t vitess/base .
+	docker build -t vitess/base .
 
 docker_base_mysql56:
 	chmod -R o=g *
-	docker build -f docker/base/Dockerfile.mysql56 -t vitess/base:mysql56 .
+	docker build -f Dockerfile.mysql56 -t vitess/base:mysql56 .
 
 docker_base_mariadb:
 	chmod -R o=g *
-	docker build -f docker/base/Dockerfile.mariadb -t vitess/base:mariadb .
+	docker build -f Dockerfile.mariadb -t vitess/base:mariadb .
 
 docker_base_percona:
 	chmod -R o=g *
-	docker build -f docker/base/Dockerfile.percona -t vitess/base:percona .
+	docker build -f Dockerfile.percona -t vitess/base:percona .
 
 docker_base_percona57:
 	chmod -R o=g *
-	docker build -f docker/base/Dockerfile.percona57 -t vitess/base:percona57 .
+	docker build -f Dockerfile.percona57 -t vitess/base:percona57 .
 
-# Run "make docker_lite PROMPT_NOTICE=false" to avoid that the script
-# prompts you to press ENTER and confirm that the vitess/base image is not
-# rebuild by this target as well.
-docker_lite:
-	cd docker/lite && ./build.sh --prompt=$(PROMPT_NOTICE)
+docker_lite: docker_base
+	cd docker/lite && ./build.sh
 
-docker_lite_mysql56:
-	cd docker/lite && ./build.sh --prompt=$(PROMPT_NOTICE) mysql56
+docker_lite_mysql56: docker_base_mysql56
+	cd docker/lite && ./build.sh mysql56
 
-docker_lite_mariadb:
-	cd docker/lite && ./build.sh --prompt=$(PROMPT_NOTICE) mariadb
+docker_lite_mariadb: docker_base_mariadb
+	cd docker/lite && ./build.sh mariadb
 
-docker_lite_percona:
-	cd docker/lite && ./build.sh --prompt=$(PROMPT_NOTICE) percona
+docker_lite_percona: docker_base_percona
+	cd docker/lite && ./build.sh percona
 
-docker_lite_percona57:
-	cd docker/lite && ./build.sh --prompt=$(PROMPT_NOTICE) percona57
+docker_lite_percona57: docker_base_percona57
+	cd docker/lite && ./build.sh percona57
 
 docker_guestbook:
 	cd examples/kubernetes/guestbook && ./build.sh

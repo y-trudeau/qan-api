@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2013, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package topo
 
@@ -146,12 +134,6 @@ func TabletEquality(left, right *topodatapb.Tablet) bool {
 	if left.Hostname != right.Hostname {
 		return false
 	}
-	if left.MysqlHostname != right.MysqlHostname {
-		return false
-	}
-	if left.MysqlPort != right.MysqlPort {
-		return false
-	}
 	if len(left.PortMap) != len(right.PortMap) {
 		return false
 	}
@@ -190,7 +172,7 @@ func (ti *TabletInfo) Addr() string {
 
 // MysqlAddr returns hostname:mysql port.
 func (ti *TabletInfo) MysqlAddr() string {
-	return netutil.JoinHostPort(topoproto.MysqlHostname(ti.Tablet), topoproto.MysqlPort(ti.Tablet))
+	return netutil.JoinHostPort(ti.Hostname, int32(ti.PortMap["mysql"]))
 }
 
 // DbName is usually implied by keyspace. Having the shard information in the
@@ -386,8 +368,7 @@ func DeleteTabletReplicationData(ctx context.Context, ts Server, tablet *topodat
 // and returns them all in a map.
 // If error is ErrPartialResult, the results in the dictionary are
 // incomplete, meaning some tablets couldn't be read.
-// The map is indexed by topoproto.TabletAliasString(tablet alias).
-func (ts Server) GetTabletMap(ctx context.Context, tabletAliases []*topodatapb.TabletAlias) (map[string]*TabletInfo, error) {
+func (ts Server) GetTabletMap(ctx context.Context, tabletAliases []*topodatapb.TabletAlias) (map[topodatapb.TabletAlias]*TabletInfo, error) {
 	span := trace.NewSpanFromContext(ctx)
 	span.StartLocal("topo.GetTabletMap")
 	span.Annotate("num_tablets", len(tabletAliases))
@@ -396,7 +377,7 @@ func (ts Server) GetTabletMap(ctx context.Context, tabletAliases []*topodatapb.T
 	wg := sync.WaitGroup{}
 	mutex := sync.Mutex{}
 
-	tabletMap := make(map[string]*TabletInfo)
+	tabletMap := make(map[topodatapb.TabletAlias]*TabletInfo)
 	var someError error
 
 	for _, tabletAlias := range tabletAliases {
@@ -412,7 +393,7 @@ func (ts Server) GetTabletMap(ctx context.Context, tabletAliases []*topodatapb.T
 					someError = ErrPartialResult
 				}
 			} else {
-				tabletMap[topoproto.TabletAliasString(tabletAlias)] = tabletInfo
+				tabletMap[*tabletAlias] = tabletInfo
 			}
 			mutex.Unlock()
 		}(tabletAlias)

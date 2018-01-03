@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package vitessdriver
 
@@ -29,21 +17,19 @@ import (
 // streamingRows creates a database/sql/driver compliant Row iterator
 // for a streaming query.
 type streamingRows struct {
-	stream  sqltypes.ResultStream
-	failed  error
-	fields  []*querypb.Field
-	qr      *sqltypes.Result
-	index   int
-	cancel  context.CancelFunc
-	convert *converter
+	stream sqltypes.ResultStream
+	failed error
+	fields []*querypb.Field
+	qr     *sqltypes.Result
+	index  int
+	cancel context.CancelFunc
 }
 
 // newStreamingRows creates a new streamingRows from stream.
-func newStreamingRows(stream sqltypes.ResultStream, cancel context.CancelFunc, conv *converter) driver.Rows {
+func newStreamingRows(stream sqltypes.ResultStream, cancel context.CancelFunc) driver.Rows {
 	return &streamingRows{
-		stream:  stream,
-		cancel:  cancel,
-		convert: conv,
+		stream: stream,
+		cancel: cancel,
 	}
 }
 
@@ -86,9 +72,7 @@ func (ri *streamingRows) Next(dest []driver.Value) error {
 		ri.qr = qr
 		ri.index = 0
 	}
-	if err := ri.convert.populateRow(dest, ri.qr.Rows[ri.index]); err != nil {
-		return err
-	}
+	populateRow(dest, ri.qr.Rows[ri.index])
 	ri.index++
 	return nil
 }

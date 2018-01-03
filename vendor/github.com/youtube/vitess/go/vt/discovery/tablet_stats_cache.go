@@ -1,28 +1,10 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package discovery
 
 import (
 	"sync"
 
-	log "github.com/golang/glog"
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
-	"github.com/youtube/vitess/go/vt/topo/topoproto"
 )
 
 // TabletStatsCache is a HealthCheckStatsListener that keeps both the
@@ -195,13 +177,9 @@ func (tc *TabletStatsCache) StatsUpdate(ts *TabletStats) {
 
 			// We already have one up server, see if we
 			// need to replace it.
-			if ts.TabletExternallyReparentedTimestamp < e.healthy[0].TabletExternallyReparentedTimestamp {
-				log.Warningf("not marking healthy master %s as Up for %s because its externally reparented timestamp is smaller than the highest known timestamp from previous MASTERs %s: %d < %d ",
-					topoproto.TabletAliasString(ts.Tablet.Alias),
-					topoproto.KeyspaceShardString(ts.Target.Keyspace, ts.Target.Shard),
-					topoproto.TabletAliasString(e.healthy[0].Tablet.Alias),
-					ts.TabletExternallyReparentedTimestamp,
-					e.healthy[0].TabletExternallyReparentedTimestamp)
+			if e.healthy[0].TabletExternallyReparentedTimestamp > ts.TabletExternallyReparentedTimestamp {
+				// The notification we just got is older than
+				// the one we had before, discard it.
 				return
 			}
 

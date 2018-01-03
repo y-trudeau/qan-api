@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package discovery
 
 import (
@@ -42,9 +26,6 @@ type TabletRecorder interface {
 
 	// RemoveTablet removes the tablet.
 	RemoveTablet(tablet *topodatapb.Tablet)
-
-	// ReplaceTablet does an AddTablet and RemoveTablet in one call, effectively replacing the old tablet with the new.
-	ReplaceTablet(old, new *topodatapb.Tablet, name string)
 }
 
 // NewCellTabletsWatcher returns a TopologyWatcher that monitors all
@@ -186,10 +167,8 @@ func (tw *TopologyWatcher) loadTablets() {
 	wg.Wait()
 	tw.mu.Lock()
 	for key, tep := range newTablets {
-		if val, ok := tw.tablets[key]; !ok {
+		if _, ok := tw.tablets[key]; !ok {
 			tw.tr.AddTablet(tep.tablet, tep.alias)
-		} else if val.alias != tep.alias {
-			tw.tr.ReplaceTablet(val.tablet, tep.tablet, tep.alias)
 		}
 	}
 	for key, tep := range tw.tablets {
@@ -295,13 +274,6 @@ func (fbs *FilterByShard) AddTablet(tablet *topodatapb.Tablet, name string) {
 func (fbs *FilterByShard) RemoveTablet(tablet *topodatapb.Tablet) {
 	if fbs.isIncluded(tablet) {
 		fbs.tr.RemoveTablet(tablet)
-	}
-}
-
-// ReplaceTablet is part of the TabletRecorder interface.
-func (fbs *FilterByShard) ReplaceTablet(old, new *topodatapb.Tablet, name string) {
-	if fbs.isIncluded(old) && fbs.isIncluded(new) {
-		fbs.tr.ReplaceTablet(old, new, name)
 	}
 }
 

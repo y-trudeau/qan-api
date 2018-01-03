@@ -1,20 +1,19 @@
 This guide shows you an example about how to apply range-based sharding
-process in an existing unsharded Vitess [keyspace]({% link overview/concepts.md %}#keyspace)
+process in an existing unsharded Vitess [keyspace](http://vitess.io/overview/concepts.html#keyspace)
 in [Kubernetes](http://kubernetes.io/) using the horizontal resharding workflow.
 In this example, we will reshard from 1 shard "0" into 2 shards "-80" and "80-".
 We will follow a process similar to the general
-[Horizontal Sharding guide]({% link user-guide/horizontal-sharding-workflow.md %})
+[Horizontal Sharding guide](http://vitess.io/user-guide/horizontal-sharding-workflow.html)
 except that here we'll give you the commands you'll need in the kubernetes
 environment.
 
 ## Overview
-
 The horizontal resharding process overview can be found
-[here]({% link user-guide/horizontal-sharding-workflow.md %}#overview) 
+[here](http://vitess.io/user-guide/horizontal-sharding-workflow.html#overview) 
 
 ## Prerequisites
 
-You should complete the [Getting Started on Kubernetes]({% link getting-started/index.md %})
+You should complete the [Getting Started on Kubernetes](http://vitess.io/getting-started/)
 guide (please finish all the steps before Try Vitess resharding) and have left
 the cluster running. Then, please follow these steps before running the
 resharding process:
@@ -28,7 +27,7 @@ resharding process:
 
 1.  Bring up tablets for 2 additional shards:  *test_keyspace/-80* and
     *test_keyspace/80-* (you can learn more about sharding key range
-    [here]({% link user-guide/sharding.md %}#key-ranges-and-partitions)):
+    [here](http://vitess.io/user-guide/sharding.html#key-ranges-and-partitions)):
 
     ``` sh
     vitess/examples/kubernetes$ ./sharded-vttablet-up.sh
@@ -69,14 +68,12 @@ resharding process:
     "Reset Job". Otherwise, the vtworker is not ready for executing other tasks.
 
 ## Horizontal Resharding Workflow
-
 ### Create the Workflow
-
 Using the web vtctld UI to create the workflow is the same with [steps in local
-environment]({% link user-guide/horizontal-sharding-workflow.md %}#create-the-workflow)
+environment](http://vitess.io/user-guide/horizontal-sharding-workflow.html#create-the-workflow)
 except for filling the "vtworker Addresses" slot. You need to get the external
 IP for vtworker service (mentioned in
-[Prerequisites](#prerequisites)) and use
+[Prerequisites](sharding-kubernetes-workflow.html#prerequisites)) and use
 \<EXTERNAL-IP\>:15033 as the vtworker addresses.
 
 Another way to start the workflow is through the vtctlclient command:
@@ -86,22 +83,18 @@ vitess/examples/kubernetes$ ./kvtctl.sh WorkflowCreate -skip_start=false horizon
 ```
 
 ### Approvals of Tasks Execution (Canary feature)
-
 Please check the content in general 
-[Horizontal Sharding guide]({% link user-guide/horizontal-sharding-workflow.md %}#approvals-of-tasks-execution-canary-feature)
+[Horizontal Sharding guide](http://vitess.io/user-guide/horizontal-sharding-workflow.html#approvals-of-tasks-execution-canary-feature)
 
 ### Retry
-
 Please check the content in general 
-[Horizontal Sharding guide]({% link user-guide/horizontal-sharding-workflow.md %}#retry)
+[Horizontal Sharding guide](http://vitess.io/user-guide/horizontal-sharding-workflow.html#retry)
 
 ### Checkpoint and Recovery
-
 Please check the content in general 
-[Horizontal Sharding guide]({% link user-guide/horizontal-sharding-workflow.md %}#checkpoint-and-recovery)
+[Horizontal Sharding guide](http://vitess.io/user-guide/horizontal-sharding-workflow.html#checkpoint-and-recovery)
 
 ## Verify Results and Clean up
-
 After the resharding process, data in the original shard is identically copied
 to new shards. Data updates will be visible on the new shards, but not on the
 original shard. You should then see in the vtctld UI *Dashboard* page that shard
@@ -111,7 +104,7 @@ then add messages to the guestbook page and inspect again. You can use
 http://\<EXTERNAL-IP\> (EXTERNAL-IP refers to the external IP of the guest book
 service) to visit the guestbook webpage in your browser and choose any random
 page for inserting information. Details can be found
-[here]({% link getting-started/index.md %}#test-your-cluster-with-a-client-app))
+[here](http://vitess.io/getting-started/#test-your-cluster-with-a-client-app))
 You can inspect the database content using the following commands:
 
 ``` sh
@@ -177,8 +170,7 @@ $ gcloud compute firewall-rules delete vtctld guestbook
 ```
 
 ## Reference
-
-You can checkout the old version tutorial [here]({% link user-guide/sharding-kubernetes.md %}).
+You can checkout the old version tutorial [here](http://vitess.io/user-guide/sharding-kubernetes.html).
 It walks you through the resharding process by manually executing commands.
 
 For the kubectl command line interface, which helps you interact with the
@@ -186,37 +178,33 @@ kubernetes cluster, you can check out more information
 [here](https://kubernetes.io/docs/user-guide/kubectl-overview).
 
 ## Troubleshooting
+### Checking status of your setup. 
+    To get status of pods and services you've setup, you can use the commands
+    (all pods should be in Running status, guestbook and vtworker services
+    should have assign external IP):
 
-### Checking status of your setup.
-
-To get status of pods and services you've setup, you can use the commands
-(all pods should be in Running status, guestbook and vtworker services
-should have assign external IP):
-
-``` sh
-$ kubectl get pods
-$ kubectl get services
-```
+    ``` sh
+    $ kubectl get pods
+    $ kubectl get services
+    ```
 
 ### Debugging pods.
+    If you find out a component (e.g. vttablet, vtgate) doesn't respond as
+    expected, you can surface the log using this command (the pod name can be
+    found out using the command mentioned above):
 
-If you find out a component (e.g. vttablet, vtgate) doesn't respond as
-expected, you can surface the log using this command (the pod name can be
-found out using the command mentioned above):
-
-``` sh
-$ kubectl logs <pod name> [-c <container>]
-### example
-# $ kubectl logs vtworker
-# $ kubectl logs vttablet-XXXX -c vttablet
-```
+    ``` sh
+    $ kubectl logs <pod name> [-c <container>]
+    ### example
+    # $ kubectl logs vtworker
+    # $ kubectl logs vttablet-XXXX -c vttablet
+    ```
 
 ### Debugging pending external IP issue.
-
-If you found that your service has a pending external IP for long time, it
-maybe because you've reached the limitation of networking resource. Please
-go to your project console on gcloud (cloud.google.com), then go to *Load
-balancing* page (you can search "Load balancing" in the search bar to get
-to the page) under Networking section. Then, click "advanced menu" for
-editing load balancing resources. Check the forwarding rules you have and
-delete the unused ones if there are too many.
+    If you found that your service has a pending external IP for long time, it
+    maybe because you've reached the limitation of networking resource. Please
+    go to your project console on gcloud (cloud.google.com), then go to *Load
+    balancing* page (you can search "Load balancing" in the search bar to get
+    to the page) under Networking section. Then, click "advanced menu" for
+    editing load balancing resources. Check the forwarding rules you have and
+    delete the unused ones if there are too many.

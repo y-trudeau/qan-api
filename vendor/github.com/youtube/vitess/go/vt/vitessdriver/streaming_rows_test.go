@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package vitessdriver
 
@@ -48,9 +36,9 @@ var packet1 = sqltypes.Result{
 var packet2 = sqltypes.Result{
 	Rows: [][]sqltypes.Value{
 		{
-			sqltypes.NewInt32(1),
-			sqltypes.TestValue(sqltypes.Float32, "1.1"),
-			sqltypes.NewVarChar("value1"),
+			sqltypes.MakeTrusted(sqltypes.Int32, []byte("1")),
+			sqltypes.MakeTrusted(sqltypes.Float32, []byte("1.1")),
+			sqltypes.MakeTrusted(sqltypes.VarChar, []byte("value1")),
 		},
 	},
 }
@@ -58,9 +46,9 @@ var packet2 = sqltypes.Result{
 var packet3 = sqltypes.Result{
 	Rows: [][]sqltypes.Value{
 		{
-			sqltypes.NewInt32(2),
-			sqltypes.TestValue(sqltypes.Float32, "2.2"),
-			sqltypes.NewVarChar("value2"),
+			sqltypes.MakeTrusted(sqltypes.Int32, []byte("2")),
+			sqltypes.MakeTrusted(sqltypes.Float32, []byte("2.2")),
+			sqltypes.MakeTrusted(sqltypes.VarChar, []byte("value2")),
 		},
 	},
 }
@@ -84,7 +72,7 @@ func TestStreamingRows(t *testing.T) {
 	c <- &packet2
 	c <- &packet3
 	close(c)
-	ri := newStreamingRows(&adapter{c: c, err: io.EOF}, nil, &converter{})
+	ri := newStreamingRows(&adapter{c: c, err: io.EOF}, nil)
 	wantCols := []string{
 		"field1",
 		"field2",
@@ -136,7 +124,7 @@ func TestStreamingRowsReversed(t *testing.T) {
 	c <- &packet2
 	c <- &packet3
 	close(c)
-	ri := newStreamingRows(&adapter{c: c, err: io.EOF}, nil, &converter{})
+	ri := newStreamingRows(&adapter{c: c, err: io.EOF}, nil)
 	defer ri.Close()
 
 	wantRow := []driver.Value{
@@ -169,7 +157,7 @@ func TestStreamingRowsReversed(t *testing.T) {
 func TestStreamingRowsError(t *testing.T) {
 	c := make(chan *sqltypes.Result)
 	close(c)
-	ri := newStreamingRows(&adapter{c: c, err: errors.New("error before fields")}, nil, &converter{})
+	ri := newStreamingRows(&adapter{c: c, err: errors.New("error before fields")}, nil)
 
 	gotCols := ri.Columns()
 	if gotCols != nil {
@@ -186,7 +174,7 @@ func TestStreamingRowsError(t *testing.T) {
 	c = make(chan *sqltypes.Result, 1)
 	c <- &packet1
 	close(c)
-	ri = newStreamingRows(&adapter{c: c, err: errors.New("error after fields")}, nil, &converter{})
+	ri = newStreamingRows(&adapter{c: c, err: errors.New("error after fields")}, nil)
 	wantCols := []string{
 		"field1",
 		"field2",
@@ -213,7 +201,7 @@ func TestStreamingRowsError(t *testing.T) {
 	c <- &packet1
 	c <- &packet2
 	close(c)
-	ri = newStreamingRows(&adapter{c: c, err: errors.New("error after rows")}, nil, &converter{})
+	ri = newStreamingRows(&adapter{c: c, err: errors.New("error after rows")}, nil)
 	gotRow = make([]driver.Value, 3)
 	err = ri.Next(gotRow)
 	if err != nil {
@@ -229,7 +217,7 @@ func TestStreamingRowsError(t *testing.T) {
 	c = make(chan *sqltypes.Result, 1)
 	c <- &packet2
 	close(c)
-	ri = newStreamingRows(&adapter{c: c, err: io.EOF}, nil, &converter{})
+	ri = newStreamingRows(&adapter{c: c, err: io.EOF}, nil)
 	gotRow = make([]driver.Value, 3)
 	err = ri.Next(gotRow)
 	wantErr = "first packet did not return fields"

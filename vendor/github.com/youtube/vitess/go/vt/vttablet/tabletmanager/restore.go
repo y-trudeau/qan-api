@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletmanager
 
@@ -23,7 +11,7 @@ import (
 	log "github.com/golang/glog"
 	"golang.org/x/net/context"
 
-	"github.com/youtube/vitess/go/mysql"
+	"github.com/youtube/vitess/go/mysqlconn/replication"
 	"github.com/youtube/vitess/go/vt/logutil"
 	"github.com/youtube/vitess/go/vt/mysqlctl"
 	"github.com/youtube/vitess/go/vt/topo/topoproto"
@@ -44,10 +32,8 @@ var (
 // an error in case of a non-recoverable error.
 // It takes the action lock so no RPC interferes.
 func (agent *ActionAgent) RestoreData(ctx context.Context, logger logutil.Logger, deleteBeforeRestore bool) error {
-	if err := agent.lock(ctx); err != nil {
-		return err
-	}
-	defer agent.unlock()
+	agent.actionMutex.Lock()
+	defer agent.actionMutex.Unlock()
 	return agent.restoreDataLocked(ctx, logger, deleteBeforeRestore)
 }
 
@@ -121,17 +107,13 @@ func (agent *ActionAgent) restoreDataLocked(ctx context.Context, logger logutil.
 	return nil
 }
 
-func (agent *ActionAgent) startReplication(ctx context.Context, pos mysql.Position, tabletType topodatapb.TabletType) error {
-	cmds := []string{
-		"STOP SLAVE",
-		"RESET SLAVE ALL", // "ALL" makes it forget master host:port.
+func (agent *ActionAgent) startReplication(ctx context.Context, pos replication.Position, tabletType topodatapb.TabletType) error {
+	// Set the position at which to resume from the master.
+	cmds, err := agent.MysqlDaemon.SetSlavePositionCommands(pos)
+	if err != nil {
+		return err
 	}
 	if err := agent.MysqlDaemon.ExecuteSuperQueryList(ctx, cmds); err != nil {
-		return fmt.Errorf("failed to reset slave: %v", err)
-	}
-
-	// Set the position at which to resume from the master.
-	if err := agent.MysqlDaemon.SetSlavePosition(ctx, pos); err != nil {
 		return fmt.Errorf("failed to set slave position: %v", err)
 	}
 
@@ -168,9 +150,15 @@ func (agent *ActionAgent) startReplication(ctx context.Context, pos mysql.Positi
 	}
 
 	// Set master and start slave.
-	if err := agent.MysqlDaemon.SetMaster(ctx, topoproto.MysqlHostname(ti.Tablet), int(topoproto.MysqlPort(ti.Tablet)), false /* slaveStopBefore */, true /* slaveStartAfter */); err != nil {
-		return fmt.Errorf("MysqlDaemon.SetMaster failed: %v", err)
+	cmds, err = agent.MysqlDaemon.SetMasterCommands(ti.Hostname, int(ti.PortMap["mysql"]))
+	if err != nil {
+		return fmt.Errorf("MysqlDaemon.SetMasterCommands failed: %v", err)
 	}
+	cmds = append(cmds, "START SLAVE")
+	if err := agent.MysqlDaemon.ExecuteSuperQueryList(ctx, cmds); err != nil {
+		return fmt.Errorf("failed to start replication: %v", err)
+	}
+
 	return nil
 }
 

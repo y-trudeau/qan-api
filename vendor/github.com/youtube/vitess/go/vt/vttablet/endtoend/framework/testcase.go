@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package framework
 
@@ -23,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/youtube/vitess/go/sqltypes"
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
 )
 
 // Testable restricts the types that can be added to
@@ -67,7 +54,7 @@ type TestCase struct {
 
 	// Query and BindVars are the input.
 	Query    string
-	BindVars map[string]*querypb.BindVariable
+	BindVars map[string]interface{}
 
 	// Result is the list of rows that must be returned.
 	// It's represented as 2-d strings. They byte values
@@ -142,7 +129,7 @@ func (tc *TestCase) Test(name string, client *QueryClient) error {
 			got = append(got, str)
 		}
 		if !reflect.DeepEqual(got, tc.Rewritten) {
-			errs = append(errs, fmt.Sprintf("Rewritten mismatch:\n'%q' does not match\n'%q'", got, tc.Rewritten))
+			errs = append(errs, fmt.Sprintf("Rewritten mismatch:\n'%+v' does not match\n'%+v'", got, tc.Rewritten))
 		}
 	}
 	if tc.Plan != "" {
@@ -159,10 +146,10 @@ func (tc *TestCase) Test(name string, client *QueryClient) error {
 	return nil
 }
 
-func exec(client *QueryClient, query string, bv map[string]*querypb.BindVariable) (*sqltypes.Result, error) {
+func exec(client *QueryClient, query string, bv map[string]interface{}) (*sqltypes.Result, error) {
 	switch query {
 	case "begin":
-		return nil, client.Begin(false)
+		return nil, client.Begin()
 	case "commit":
 		return nil, client.Commit()
 	case "rollback":
@@ -177,7 +164,7 @@ func RowsToStrings(qr *sqltypes.Result) [][]string {
 	for _, row := range qr.Rows {
 		var srow []string
 		for _, cell := range row {
-			srow = append(srow, cell.ToString())
+			srow = append(srow, cell.String())
 		}
 		result = append(result, srow)
 	}

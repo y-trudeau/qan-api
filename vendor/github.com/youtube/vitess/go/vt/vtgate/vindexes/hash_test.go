@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package vindexes
 
@@ -20,8 +8,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/youtube/vitess/go/sqltypes"
 )
 
 var hash Vindex
@@ -47,14 +33,7 @@ func TestHashString(t *testing.T) {
 }
 
 func TestHashMap(t *testing.T) {
-	got, err := hash.(Unique).Map(nil, []sqltypes.Value{
-		sqltypes.NewInt64(1),
-		sqltypes.NewInt64(2),
-		sqltypes.NewInt64(3),
-		sqltypes.NewInt64(4),
-		sqltypes.NewInt64(5),
-		sqltypes.NewInt64(6),
-	})
+	got, err := hash.(Unique).Map(nil, []interface{}{1, int32(2), int64(3), uint(4), uint32(5), uint64(6)})
 	if err != nil {
 		t.Error(err)
 	}
@@ -70,31 +49,43 @@ func TestHashMap(t *testing.T) {
 		t.Errorf("Map(): %#v, want %+v", got, want)
 	}
 
-	// Negative Test Case.
-	_, err = hash.(Unique).Map(nil, []sqltypes.Value{sqltypes.NewFloat64(1.2)})
-	wanterr := "hash.Map: could not parse value: 1.2"
-	if err == nil || err.Error() != wanterr {
-		t.Errorf("hash.Map() error: %v, want %s", err, wanterr)
+	//Negative Test Case
+	_, err = hash.(Unique).Map(nil, []interface{}{1.2})
+	wanterr := "hash.Map: getNumber: unexpected type for 1.2: float64"
+	if err.Error() != wanterr {
+		t.Error(err)
 	}
 }
 
 func TestHashVerify(t *testing.T) {
-	ids := []sqltypes.Value{sqltypes.NewInt64(1), sqltypes.NewInt64(2)}
-	ksids := [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6"), []byte("\x16k@\xb4J\xbaK\xd6")}
-	got, err := hash.Verify(nil, ids, ksids)
+	success, err := hash.Verify(nil, []interface{}{1}, [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6")})
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
-	want := []bool{true, false}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("binaryMD5.Verify: %v, want %v", got, want)
+	if !success {
+		t.Errorf("Verify(): %+v, want true", success)
+	}
+}
+
+func TestHashVerifyNeg(t *testing.T) {
+	_, err := hash.Verify(nil, []interface{}{1, 2}, [][]byte{[]byte("\x16k@\xb4J\xbaK\xd6")})
+	want := "hash.Verify: length of ids 2 doesn't match length of ksids 1"
+	if err.Error() != want {
+		t.Error(err.Error())
 	}
 
-	// Failure test
-	_, err = hash.Verify(nil, []sqltypes.Value{sqltypes.NewVarBinary("aa")}, [][]byte{nil})
-	wantErr := "hash.Verify: could not parse value: aa"
-	if err == nil || err.Error() != wantErr {
-		t.Errorf("hash.Verify err: %v, want %s", err, wantErr)
+	_, err = hash.Verify(nil, []interface{}{1.2}, [][]byte{[]byte("test1")})
+	want = "hash.Verify: getNumber: unexpected type for 1.2: float64"
+	if err.Error() != want {
+		t.Error(err)
+	}
+
+	success, err := hash.Verify(nil, []interface{}{uint(4)}, [][]byte{[]byte("\x06\xe7\xea\"Βp\x8f")})
+	if err != nil {
+		t.Error(err)
+	}
+	if success {
+		t.Errorf("Verify(): %+v, want false", success)
 	}
 }
 
@@ -103,9 +94,8 @@ func TestHashReverseMap(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	want := []sqltypes.Value{sqltypes.NewUint64(uint64(1))}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("ReverseMap(): %v, want %v", got, want)
+	if got[0].(int64) != 1 {
+		t.Errorf("ReverseMap(): %+v, want 1", got)
 	}
 }
 

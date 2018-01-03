@@ -1,21 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# Copyright 2017 Google Inc.
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-
 import itertools
 import logging
 import unittest
@@ -66,14 +51,6 @@ music_id bigint,
 user_id bigint,
 artist varchar(64),
 primary key (music_id)
-) Engine=InnoDB'''
-
-create_upsert = '''create table upsert (
-pk bigint,
-owned bigint,
-user_id bigint,
-col bigint,
-primary key (pk)
 ) Engine=InnoDB'''
 
 create_join_user = '''create table join_user (
@@ -139,18 +116,6 @@ user_id bigint,
 primary key (music_id)
 ) Engine=InnoDB'''
 
-create_upsert_primary = '''create table upsert_primary (
-id bigint,
-ksnum_id bigint,
-primary key (id)
-) Engine=InnoDB'''
-
-create_upsert_owned = '''create table upsert_owned (
-owned bigint,
-ksnum_id bigint,
-primary key (owned)
-) Engine=InnoDB'''
-
 create_main = '''create table main (
 id bigint,
 val varchar(128),
@@ -190,23 +155,6 @@ vschema = {
             "to": "user_id"
           },
           "owner": "vt_music"
-        },
-        "upsert_primary": {
-          "type": "lookup_hash_unique",
-          "params": {
-            "table": "upsert_primary",
-            "from": "id",
-            "to": "ksnum_id"
-          }
-        },
-        "upsert_owned": {
-          "type": "lookup_hash_unique",
-          "params": {
-            "table": "upsert_owned",
-            "from": "owned",
-            "to": "ksnum_id"
-          },
-          "owner": "upsert"
         }
       },
       "tables": {
@@ -270,22 +218,6 @@ vschema = {
             }
           ]
         },
-        "upsert": {
-          "column_vindexes": [
-            {
-              "column": "pk",
-              "name": "upsert_primary"
-            },
-            {
-              "column": "owned",
-              "name": "upsert_owned"
-            },
-            {
-              "column": "user_id",
-              "name": "user_index"
-            }
-          ]
-        },
         "join_user": {
           "column_vindexes": [
             {
@@ -334,8 +266,6 @@ vschema = {
         },
         "music_user_map": {},
         "name_user2_map": {},
-        "upsert_primary": {},
-        "upsert_owned": {},
         "main": {
           "auto_increment": {
             "column": "id",
@@ -368,7 +298,6 @@ def setUpModule():
             create_vt_user_extra,
             create_vt_music,
             create_vt_music_extra,
-            create_upsert,
             create_join_user,
             create_join_user_extra,
             create_join_name_info,
@@ -385,8 +314,6 @@ def setUpModule():
             create_vt_main_seq,
             create_music_user_map,
             create_name_user2_map,
-            create_upsert_primary,
-            create_upsert_owned,
             create_main,
             create_twopc_lookup,
             ],
@@ -399,7 +326,7 @@ def setUpModule():
     utils.apply_vschema(vschema)
     utils.VtGate().start(
         tablets=[shard_0_master, shard_1_master, lookup_master],
-        extra_args=['-transaction_mode', 'TWOPC'])
+        extra_args=['-transaction_mode', 'twopc'])
     utils.vtgate.wait_for_endpoints('user.-80.master', 1)
     utils.vtgate.wait_for_endpoints('user.80-.master', 1)
     utils.vtgate.wait_for_endpoints('lookup.0.master', 1)
@@ -976,6 +903,7 @@ class TestVTGateFunctions(unittest.TestCase):
     self.assertEqual(result, ())
 
   def test_main_seq(self):
+    # music is for testing owned lookup index
     vtgate_conn = get_connection()
 
     # Initialize the sequence.
@@ -1002,87 +930,6 @@ class TestVTGateFunctions(unittest.TestCase):
         ([(4, 'test 4')], 1, 0,
          [('id', self.int_type),
           ('val', self.string_type)]))
-    
-    # Now test direct calls to sequence.
-    result = self.execute_on_master(
-        vtgate_conn, 'select next 1 values from vt_main_seq', {})
-    self.assertEqual(
-        result,
-        ([(5,)], 1, 0,
-         [('nextval', self.int_type)]))
-
-  def test_upsert(self):
-    vtgate_conn = get_connection()
-
-    # Create lookup entries for primary vindex:
-    # No entry for 2. upsert_primary is not owned.
-    # So, we need to pre-create entries that the
-    # subsequent will insert will use to compute the
-    # keyspace id.
-    vtgate_conn.begin()
-    self.execute_on_master(
-        vtgate_conn,
-        'insert into upsert_primary(id, ksnum_id) values'
-        '(1, 1), (3, 3), (4, 4), (5, 5), (6, 6)',
-        {})
-    vtgate_conn.commit()
-
-    # Create rows on the main table.
-    vtgate_conn.begin()
-    self.execute_on_master(
-        vtgate_conn,
-        'insert into upsert(pk, owned, user_id, col) values'
-        '(1, 1, 1, 0), (3, 3, 3, 0), (4, 4, 4, 0), (5, 5, 5, 0), (6, 6, 6, 0)',
-        {})
-    vtgate_conn.commit()
-
-    # Now upsert: 1, 5 and 6 should succeed.
-    vtgate_conn.begin()
-    self.execute_on_master(
-        vtgate_conn,
-        'insert into upsert(pk, owned, user_id, col) values'
-        '(1, 1, 1, 1), (2, 2, 2, 2), (3, 1, 1, 3), (4, 4, 1, 4), '
-        '(5, 5, 5, 5), (6, 6, 6, 6) '
-        'on duplicate key update col = values(col)',
-        {})
-    vtgate_conn.commit()
-
-    result = self.execute_on_master(
-        vtgate_conn,
-        'select pk, owned, user_id, col from upsert order by pk',
-        {})
-    self.assertEqual(
-        result[0],
-        [(1, 1, 1, 1), (3, 3, 3, 0), (4, 4, 4, 0),
-         (5, 5, 5, 5), (6, 6, 6, 6)])
-
-    # insert ignore
-    vtgate_conn.begin()
-    self.execute_on_master(
-        vtgate_conn,
-        'insert into upsert_primary(id, ksnum_id) values(7, 7)',
-        {})
-    vtgate_conn.commit()
-    # 1 will be sent but will not change existing row.
-    # 2 will not be sent because there is no keyspace id for it.
-    # 7 will be sent and will create a row.
-    vtgate_conn.begin()
-    self.execute_on_master(
-        vtgate_conn,
-        'insert ignore into upsert(pk, owned, user_id, col) values'
-        '(1, 1, 1, 2), (2, 2, 2, 2), (7, 7, 7, 7)',
-        {})
-    vtgate_conn.commit()
-
-    result = self.execute_on_master(
-        vtgate_conn,
-        'select pk, owned, user_id, col from upsert order by pk',
-        {})
-    self.assertEqual(
-        result[0],
-        [(1, 1, 1, 1), (3, 3, 3, 0), (4, 4, 4, 0),
-         (5, 5, 5, 5), (6, 6, 6, 6), (7, 7, 7, 7)])
-
 
   def test_joins(self):
     vtgate_conn = get_connection()

@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package main
 
@@ -22,7 +10,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"math/rand"
 	"os"
 	"sort"
 	"sync"
@@ -52,19 +39,18 @@ Examples:
 
   $ vtclient -server vtgate:15991 "SELECT * FROM messages"
 
-  $ vtclient -server vtgate:15991 -target '@master' -bind_variables '[ 12345, 1, "msg 12345" ]' "INSERT INTO messages (page,time_created_ns,message) VALUES (:v1, :v2, :v3)"
+  $ vtclient -server vtgate:15991 -tablet_type master -bind_variables '[ 12345, 1, "msg 12345" ]' "INSERT INTO messages (page,time_created_ns,message) VALUES (:v1, :v2, :v3)"
 
 `
 	server        = flag.String("server", "", "vtgate server to connect to")
+	tabletType    = flag.String("tablet_type", "rdonly", "tablet type to direct queries to")
 	timeout       = flag.Duration("timeout", 30*time.Second, "timeout for queries")
 	streaming     = flag.Bool("streaming", false, "use a streaming query")
 	bindVariables = newBindvars("bind_variables", "bind variables as a json list")
-	targetString  = flag.String("target", "", "keyspace:shard@tablet_type")
+	keyspace      = flag.String("keyspace", "", "Keyspace of a specific keyspace/shard to target. If shard is also specified, disables v3. Otherwise it's the default keyspace to use.")
 	jsonOutput    = flag.Bool("json", false, "Output JSON instead of human-readable table")
 	parallel      = flag.Int("parallel", 1, "DMLs only: Number of threads executing the same query in parallel. Useful for simple load testing.")
 	count         = flag.Int("count", 1, "DMLs only: Number of times each thread executes the query. Useful for simple, sustained load testing.")
-	minRandomID   = flag.Int("min_random_id", 0, "min random ID to generate. When max_random_id > min_random_id, for each query, a random number is generated in [min_random_id, max_random_id) and attached to the end of the bind variables.")
-	maxRandomID   = flag.Int("max_random_id", 0, "max random ID.")
 )
 
 func init() {
@@ -149,11 +135,12 @@ func run() (*results, error) {
 	}
 
 	c := vitessdriver.Configuration{
-		Protocol:  *vtgateconn.VtgateProtocol,
-		Address:   *server,
-		Target:    *targetString,
-		Timeout:   *timeout,
-		Streaming: *streaming,
+		Protocol:   *vtgateconn.VtgateProtocol,
+		Address:    *server,
+		Keyspace:   *keyspace,
+		TabletType: *tabletType,
+		Timeout:    *timeout,
+		Streaming:  *streaming,
 	}
 	db, err := vitessdriver.OpenWithConfiguration(c)
 	if err != nil {
@@ -162,22 +149,17 @@ func run() (*results, error) {
 
 	log.Infof("Sending the query...")
 
-	return execMulti(db, args[0])
-}
-
-func prepareBindVariables() []interface{} {
-	bv := *bindVariables
-	if *maxRandomID > *minRandomID {
-		bv = append(bv, rand.Intn(*maxRandomID-*minRandomID)+*minRandomID)
+	if sqlparser.IsDML(args[0]) {
+		return execMultiDml(db, args[0])
 	}
-	return bv
+
+	return execNonDml(db, args[0])
 }
 
-func execMulti(db *sql.DB, sql string) (*results, error) {
+func execMultiDml(db *sql.DB, sql string) (*results, error) {
 	all := newResults()
 	ec := concurrency.FirstErrorRecorder{}
 	wg := sync.WaitGroup{}
-	isDML := sqlparser.IsDML(sql)
 
 	start := time.Now()
 	for i := 0; i < *parallel; i++ {
@@ -187,32 +169,18 @@ func execMulti(db *sql.DB, sql string) (*results, error) {
 			defer wg.Done()
 
 			for j := 0; j < *count; j++ {
-				var qr *results
-				var err error
-				if isDML {
-					qr, err = execDml(db, sql)
-				} else {
-					qr, err = execNonDml(db, sql)
-				}
-				if *count == 1 && *parallel == 1 {
-					all = qr
-				} else {
-					all.merge(qr)
-					if err != nil {
-						all.recordError(err)
-					}
-				}
+				qr, err := execDml(db, sql)
+				all.merge(qr)
 				if err != nil {
 					ec.RecordError(err)
+					all.recordError(err)
 					// We keep going and do not return early purpose.
 				}
 			}
 		}()
 	}
 	wg.Wait()
-	if all != nil {
-		all.duration = time.Since(start)
-	}
+	all.duration = time.Since(start)
 
 	return all, ec.Error()
 }
@@ -221,17 +189,17 @@ func execDml(db *sql.DB, sql string) (*results, error) {
 	start := time.Now()
 	tx, err := db.Begin()
 	if err != nil {
-		return nil, vterrors.Wrap(err, "BEGIN failed")
+		return nil, vterrors.Errorf(vterrors.Code(err), "BEGIN failed: %v", err)
 	}
 
-	result, err := tx.Exec(sql, []interface{}(prepareBindVariables())...)
+	result, err := tx.Exec(sql, []interface{}(*bindVariables)...)
 	if err != nil {
-		return nil, vterrors.Wrap(err, "failed to execute DML")
+		return nil, vterrors.Errorf(vterrors.Code(err), "failed to execute DML: %v", err)
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		return nil, vterrors.Wrap(err, "COMMIT failed")
+		return nil, vterrors.Errorf(vterrors.Code(err), "COMMIT failed: %v", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -245,9 +213,9 @@ func execDml(db *sql.DB, sql string) (*results, error) {
 
 func execNonDml(db *sql.DB, sql string) (*results, error) {
 	start := time.Now()
-	rows, err := db.Query(sql, []interface{}(prepareBindVariables())...)
+	rows, err := db.Query(sql, []interface{}(*bindVariables)...)
 	if err != nil {
-		return nil, vterrors.Wrap(err, "client error")
+		return nil, vterrors.Errorf(vterrors.Code(err), "client error: %v", err)
 	}
 	defer rows.Close()
 

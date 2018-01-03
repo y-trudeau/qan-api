@@ -1,6 +1,24 @@
 
 {
 	"Tests": {
+		"automation_horizontal_resharding": {
+			"File": "automation_horizontal_resharding.py",
+			"Args": [],
+			"Command": [],
+			"Manual": false,
+			"Shard": 4,
+			"RetryMax": 0,
+			"Tags": []
+		},
+		"automation_vertical_split": {
+			"File": "automation_vertical_split.py",
+			"Args": [],
+			"Command": [],
+			"Manual": false,
+			"Shard": 3,
+			"RetryMax": 0,
+			"Tags": []
+		},
 		"backup": {
 			"File": "backup.py",
 			"Args": [],
@@ -197,9 +215,7 @@
 			"Manual": false,
 			"Shard": 1,
 			"RetryMax": 0,
-			"Tags": [
-				"tests_broken_on_travis"
-			]
+			"Tags": []
 		},
 		"mysqlctl": {
 			"File": "mysqlctl.py",
@@ -304,6 +320,17 @@
 				"site_test"
 			]
 		},
+		"tabletmanager_zookeeper": {
+			"File": "tabletmanager.py",
+			"Args": ["--topo-server-flavor=zookeeper"],
+			"Command": [],
+			"Manual": false,
+			"Shard": 1,
+			"RetryMax": 0,
+			"Tags": [
+				"site_test"
+			]
+		},
 		"tabletmanager_etcd": {
 			"File": "tabletmanager.py",
 			"Args": ["--topo-server-flavor=etcd"],
@@ -346,9 +373,7 @@
 			"Manual": false,
 			"Shard": 1,
 			"RetryMax": 1,
-			"Tags": [
-				"tests_broken_on_travis"
-			]
+			"Tags": []
 		},
 		"unit_race": {
 			"File": "",
@@ -357,7 +382,7 @@
 				"make",
 				"unit_test_race"
 			],
-			"Manual": true,
+			"Manual": false,
 			"Shard": 0,
 			"RetryMax": 0,
 			"Tags": []

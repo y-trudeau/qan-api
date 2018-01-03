@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package mysqlctl
 
@@ -23,8 +11,10 @@ import (
 	log "github.com/golang/glog"
 	"golang.org/x/net/context"
 
-	"github.com/youtube/vitess/go/mysql"
+	"github.com/youtube/vitess/go/mysqlconn"
+	"github.com/youtube/vitess/go/mysqlconn/replication"
 	"github.com/youtube/vitess/go/pools"
+	"github.com/youtube/vitess/go/sqldb"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
 )
 
@@ -39,7 +29,7 @@ var (
 // mysqld with a server ID that is unique both among other SlaveConnections and
 // among actual slaves in the topology.
 type SlaveConnection struct {
-	*mysql.Conn
+	*mysqlconn.Conn
 	mysqld  *Mysqld
 	slaveID uint32
 	cancel  context.CancelFunc
@@ -69,14 +59,14 @@ func (mysqld *Mysqld) NewSlaveConnection() (*SlaveConnection, error) {
 }
 
 // connectForReplication create a MySQL connection ready to use for replication.
-func (mysqld *Mysqld) connectForReplication() (*mysql.Conn, error) {
+func (mysqld *Mysqld) connectForReplication() (*mysqlconn.Conn, error) {
 	params, err := dbconfigs.WithCredentials(&mysqld.dbcfgs.Dba)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx := context.Background()
-	conn, err := mysql.Connect(ctx, &params)
+	conn, err := mysqlconn.Connect(ctx, &params)
 	if err != nil {
 		return nil, err
 	}
@@ -95,12 +85,17 @@ var slaveIDPool = pools.NewIDPool()
 
 // StartBinlogDumpFromCurrent requests a replication binlog dump from
 // the current position.
-func (sc *SlaveConnection) StartBinlogDumpFromCurrent(ctx context.Context) (mysql.Position, <-chan mysql.BinlogEvent, error) {
+func (sc *SlaveConnection) StartBinlogDumpFromCurrent(ctx context.Context) (replication.Position, <-chan replication.BinlogEvent, error) {
 	ctx, sc.cancel = context.WithCancel(ctx)
 
-	masterPosition, err := sc.mysqld.MasterPosition()
+	flavor, err := sc.mysqld.flavor()
 	if err != nil {
-		return mysql.Position{}, nil, fmt.Errorf("failed to get master position: %v", err)
+		return replication.Position{}, nil, fmt.Errorf("StartBinlogDump needs flavor: %v", err)
+	}
+
+	masterPosition, err := flavor.MasterPosition(sc.mysqld)
+	if err != nil {
+		return replication.Position{}, nil, fmt.Errorf("failed to get master position: %v", err)
 	}
 
 	c, err := sc.StartBinlogDumpFromPosition(ctx, masterPosition)
@@ -115,11 +110,16 @@ func (sc *SlaveConnection) StartBinlogDumpFromCurrent(ctx context.Context) (mysq
 // by canceling the context.
 //
 // Note the context is valid and used until eventChan is closed.
-func (sc *SlaveConnection) StartBinlogDumpFromPosition(ctx context.Context, startPos mysql.Position) (<-chan mysql.BinlogEvent, error) {
+func (sc *SlaveConnection) StartBinlogDumpFromPosition(ctx context.Context, startPos replication.Position) (<-chan replication.BinlogEvent, error) {
 	ctx, sc.cancel = context.WithCancel(ctx)
 
+	flavor, err := sc.mysqld.flavor()
+	if err != nil {
+		return nil, fmt.Errorf("StartBinlogDump needs flavor: %v", err)
+	}
+
 	log.Infof("sending binlog dump command: startPos=%v, slaveID=%v", startPos, sc.slaveID)
-	if err := sc.SendBinlogDumpCommand(sc.slaveID, startPos); err != nil {
+	if err = flavor.SendBinlogDumpCommand(sc, startPos); err != nil {
 		log.Errorf("couldn't send binlog dump command: %v", err)
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (sc *SlaveConnection) StartBinlogDumpFromPosition(ctx context.Context, star
 	}
 
 	// FIXME(alainjobart) I think we can use a buffered channel for better performance.
-	eventChan := make(chan mysql.BinlogEvent)
+	eventChan := make(chan replication.BinlogEvent)
 
 	// Start reading events.
 	sc.wg.Add(1)
@@ -142,27 +142,22 @@ func (sc *SlaveConnection) StartBinlogDumpFromPosition(ctx context.Context, star
 			sc.wg.Done()
 		}()
 		for {
-			// Handle EOF and error case.
-			switch buf[0] {
-			case mysql.EOFPacket:
+			if buf[0] == 254 {
+				// The master is telling us to stop.
 				log.Infof("received EOF packet in binlog dump: %#v", buf)
-				return
-			case mysql.ErrPacket:
-				err := mysql.ParseErrorPacket(buf)
-				log.Infof("received error packet in binlog dump: %v", err)
 				return
 			}
 
 			select {
-			// Skip the first byte because it's only used for signaling EOF / error.
-			case eventChan <- sc.Conn.MakeBinlogEvent(buf[1:]):
+			// Skip the first byte because it's only used for signaling EOF.
+			case eventChan <- flavor.MakeBinlogEvent(buf[1:]):
 			case <-ctx.Done():
 				return
 			}
 
 			buf, err = sc.Conn.ReadPacket()
 			if err != nil {
-				if sqlErr, ok := err.(*mysql.SQLError); ok && sqlErr.Number() == mysql.CRServerLost {
+				if sqlErr, ok := err.(*sqldb.SQLError); ok && sqlErr.Number() == mysqlconn.CRServerLost {
 					// CRServerLost = Lost connection to MySQL server during query
 					// This is not necessarily an error. It could just be that we closed
 					// the connection from outside.
@@ -206,8 +201,13 @@ func (sc *SlaveConnection) StartBinlogDumpFromPosition(ctx context.Context, star
 // by canceling the context.
 //
 // Note the context is valid and used until eventChan is closed.
-func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.Context, timestamp int64) (<-chan mysql.BinlogEvent, error) {
+func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.Context, timestamp int64) (<-chan replication.BinlogEvent, error) {
 	ctx, sc.cancel = context.WithCancel(ctx)
+
+	flavor, err := sc.mysqld.flavor()
+	if err != nil {
+		return nil, fmt.Errorf("StartBinlogDump needs flavor: %v", err)
+	}
 
 	// List the binlogs.
 	binlogs, err := sc.Conn.ExecuteFetch("SHOW BINARY LOGS", 1000, false)
@@ -217,7 +217,7 @@ func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.
 
 	// Start with the most recent binlog file until we find the right event.
 	var binlogIndex int
-	var event mysql.BinlogEvent
+	var event replication.BinlogEvent
 	for binlogIndex = len(binlogs.Rows) - 1; binlogIndex >= 0; binlogIndex-- {
 		// Exit the loop early if context is canceled.
 		select {
@@ -229,7 +229,7 @@ func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.
 		// Start dumping the logs. The position is '4' to skip the
 		// Binlog File Header. See this page for more info:
 		// https://dev.mysql.com/doc/internals/en/binlog-file.html
-		binlog := binlogs.Rows[binlogIndex][0].ToString()
+		binlog := binlogs.Rows[binlogIndex][0].String()
 		if err := sc.Conn.WriteComBinlogDump(sc.slaveID, binlog, 4, 0); err != nil {
 			return nil, fmt.Errorf("failed to send the ComBinlogDump command: %v", err)
 		}
@@ -243,17 +243,13 @@ func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.
 				return nil, fmt.Errorf("couldn't start binlog dump of binlog %v: %v", binlog, err)
 			}
 
-			// Handle EOF and error case.
-			switch buf[0] {
-			case mysql.EOFPacket:
+			// Why would the master tell us to stop here?
+			if buf[0] == 254 {
 				return nil, fmt.Errorf("received EOF packet for first packet of binlog %v", binlog)
-			case mysql.ErrPacket:
-				err := mysql.ParseErrorPacket(buf)
-				return nil, fmt.Errorf("received error packet for first packet of binlog %v", err)
 			}
 
 			// Parse the full event.
-			event = sc.Conn.MakeBinlogEvent(buf[1:])
+			event = flavor.MakeBinlogEvent(buf[1:])
 			if !event.IsValid() {
 				return nil, fmt.Errorf("first event from binlog %v is not valid", binlog)
 			}
@@ -287,7 +283,7 @@ func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.
 
 	// Now just loop sending and reading events.
 	// FIXME(alainjobart) I think we can use a buffered channel for better performance.
-	eventChan := make(chan mysql.BinlogEvent)
+	eventChan := make(chan replication.BinlogEvent)
 
 	// Start reading events.
 	sc.wg.Add(1)
@@ -306,7 +302,7 @@ func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.
 
 			buf, err := sc.Conn.ReadPacket()
 			if err != nil {
-				if sqlErr, ok := err.(*mysql.SQLError); ok && sqlErr.Number() == mysql.CRServerLost {
+				if sqlErr, ok := err.(*sqldb.SQLError); ok && sqlErr.Number() == mysqlconn.CRServerLost {
 					// CRServerLost = Lost connection to MySQL server during query
 					// This is not necessarily an error. It could just be that we closed
 					// the connection from outside.
@@ -317,20 +313,15 @@ func (sc *SlaveConnection) StartBinlogDumpFromBinlogBeforeTimestamp(ctx context.
 				return
 			}
 
-			// Handle EOF and error case.
-			switch buf[0] {
-			case mysql.EOFPacket:
+			if buf[0] == 254 {
 				// The master is telling us to stop.
 				log.Infof("received EOF packet in binlog dump: %#v", buf)
 				return
-			case mysql.ErrPacket:
-				err := mysql.ParseErrorPacket(buf)
-				log.Infof("received error packet in binlog dump: %v", err)
 			}
 
 			// Skip the first byte because it's only used
-			// for signaling EOF / error.
-			event = sc.Conn.MakeBinlogEvent(buf[1:])
+			// for signaling EOF.
+			event = flavor.MakeBinlogEvent(buf[1:])
 		}
 	}()
 

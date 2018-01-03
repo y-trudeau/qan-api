@@ -139,8 +139,9 @@ available and consistent data store.
 
 Lock servers were built for this exact purpose, and Vitess needs one such
 cluster to be setup to run smoothly. Vitess can be customized to utilize any
-lock server, and by default it supports Zookeeper, etcd and Consul. We call this
-component [Topology Service]({% link user-guide/topology-service.md %}).
+lock server, and by default it supports zookeeper and etcd. We call this
+component
+[Topology Service](/user-guide/topology-service.html).
 
 As Vitess is meant to run in multiple data centers / regions (called cells
 below), it relies on two different lock servers:
@@ -225,7 +226,7 @@ Vitess RPC interface requires the query itself to be valid UTF-8.
 Since Vitess handles query routing for you and lets you access any
 instance in the cluster from any single VTGate endpoint,
 the Vitess clients have an additional parameter for you to specify
-which [tablet type]({% link overview/concepts.md %}#tablet-types) you want
+which [tablet type](/overview/concepts.html#tablet-types) you want
 to send your query to.
 
 Writes must be directed to a *master* type tablet, as well as reads

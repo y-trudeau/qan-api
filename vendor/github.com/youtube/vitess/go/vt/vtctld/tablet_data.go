@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package vtctld
 
 import (
@@ -25,7 +9,6 @@ import (
 	log "github.com/golang/glog"
 
 	"github.com/youtube/vitess/go/vt/topo"
-	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletconn"
 	"golang.org/x/net/context"
 
@@ -128,35 +111,31 @@ func (th *tabletHealth) stream(ctx context.Context, ts topo.Server, tabletAlias 
 type tabletHealthCache struct {
 	ts topo.Server
 
-	// mu protects the map.
-	mu sync.Mutex
-
-	// tabletMap is keyed by topoproto.TabletAliasString(tablet alias).
-	tabletMap map[string]*tabletHealth
+	mu        sync.Mutex
+	tabletMap map[topodatapb.TabletAlias]*tabletHealth
 }
 
 func newTabletHealthCache(ts topo.Server) *tabletHealthCache {
 	return &tabletHealthCache{
 		ts:        ts,
-		tabletMap: make(map[string]*tabletHealth),
+		tabletMap: make(map[topodatapb.TabletAlias]*tabletHealth),
 	}
 }
 
 func (thc *tabletHealthCache) Get(ctx context.Context, tabletAlias *topodatapb.TabletAlias) (*querypb.StreamHealthResponse, error) {
 	thc.mu.Lock()
 
-	tabletAliasStr := topoproto.TabletAliasString(tabletAlias)
-	th, ok := thc.tabletMap[tabletAliasStr]
+	th, ok := thc.tabletMap[*tabletAlias]
 	if !ok {
 		// No existing stream, so start one.
 		th = newTabletHealth()
-		thc.tabletMap[tabletAliasStr] = th
+		thc.tabletMap[*tabletAlias] = th
 
 		go func() {
 			log.Infof("starting health stream for tablet %v", tabletAlias)
 			err := th.stream(context.Background(), thc.ts, tabletAlias)
 			log.Infof("tablet %v health stream ended, error: %v", tabletAlias, err)
-			thc.delete(tabletAliasStr)
+			thc.delete(tabletAlias)
 		}()
 	}
 
@@ -165,8 +144,8 @@ func (thc *tabletHealthCache) Get(ctx context.Context, tabletAlias *topodatapb.T
 	return th.lastResult(ctx)
 }
 
-func (thc *tabletHealthCache) delete(tabletAliasStr string) {
+func (thc *tabletHealthCache) delete(tabletAlias *topodatapb.TabletAlias) {
 	thc.mu.Lock()
-	delete(thc.tabletMap, tabletAliasStr)
+	delete(thc.tabletMap, *tabletAlias)
 	thc.mu.Unlock()
 }

@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package sqlparser
 
@@ -29,93 +17,136 @@ func TestNormalize(t *testing.T) {
 	testcases := []struct {
 		in      string
 		outstmt string
-		outbv   map[string]*querypb.BindVariable
+		outbv   map[string]interface{}
 	}{{
 		// str val
 		in:      "select * from t where v1 = 'aa'",
 		outstmt: "select * from t where v1 = :bv1",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.BytesBindVariable([]byte("aa")),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type:  sqltypes.VarBinary,
+				Value: []byte("aa"),
+			},
 		},
 	}, {
 		// int val
 		in:      "select * from t where v1 = 1",
 		outstmt: "select * from t where v1 = :bv1",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.Int64BindVariable(1),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type:  sqltypes.Int64,
+				Value: []byte("1"),
+			},
 		},
 	}, {
 		// float val
 		in:      "select * from t where v1 = 1.2",
 		outstmt: "select * from t where v1 = :bv1",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.Float64BindVariable(1.2),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type:  sqltypes.Float64,
+				Value: []byte("1.2"),
+			},
 		},
 	}, {
 		// multiple vals
 		in:      "select * from t where v1 = 1.2 and v2 = 2",
 		outstmt: "select * from t where v1 = :bv1 and v2 = :bv2",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.Float64BindVariable(1.2),
-			"bv2": sqltypes.Int64BindVariable(2),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type:  sqltypes.Float64,
+				Value: []byte("1.2"),
+			},
+			"bv2": &querypb.BindVariable{
+				Type:  sqltypes.Int64,
+				Value: []byte("2"),
+			},
 		},
 	}, {
 		// bv collision
 		in:      "select * from t where v1 = :bv1 and v2 = 1",
 		outstmt: "select * from t where v1 = :bv1 and v2 = :bv2",
-		outbv: map[string]*querypb.BindVariable{
-			"bv2": sqltypes.Int64BindVariable(1),
+		outbv: map[string]interface{}{
+			"bv2": &querypb.BindVariable{
+				Type:  sqltypes.Int64,
+				Value: []byte("1"),
+			},
 		},
 	}, {
 		// val reuse
 		in:      "select * from t where v1 = 1 and v2 = 1",
 		outstmt: "select * from t where v1 = :bv1 and v2 = :bv1",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.Int64BindVariable(1),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type:  sqltypes.Int64,
+				Value: []byte("1"),
+			},
 		},
 	}, {
 		// ints and strings are different
 		in:      "select * from t where v1 = 1 and v2 = '1'",
 		outstmt: "select * from t where v1 = :bv1 and v2 = :bv2",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.Int64BindVariable(1),
-			"bv2": sqltypes.BytesBindVariable([]byte("1")),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type:  sqltypes.Int64,
+				Value: []byte("1"),
+			},
+			"bv2": &querypb.BindVariable{
+				Type:  sqltypes.VarBinary,
+				Value: []byte("1"),
+			},
 		},
-	}, {
-		// bad int
-		in:      "select * from t where v1 = 12345678901234567890",
-		outstmt: "select * from t where v1 = 12345678901234567890",
-		outbv:   map[string]*querypb.BindVariable{},
 	}, {
 		// comparison with no vals
 		in:      "select * from t where v1 = v2",
 		outstmt: "select * from t where v1 = v2",
-		outbv:   map[string]*querypb.BindVariable{},
+		outbv:   map[string]interface{}{},
 	}, {
 		// IN clause with existing bv
 		in:      "select * from t where v1 in ::list",
 		outstmt: "select * from t where v1 in ::list",
-		outbv:   map[string]*querypb.BindVariable{},
+		outbv:   map[string]interface{}{},
 	}, {
 		// IN clause with non-val values
 		in:      "select * from t where v1 in (1, a)",
 		outstmt: "select * from t where v1 in (:bv1, a)",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.Int64BindVariable(1),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type:  sqltypes.Int64,
+				Value: []byte("1"),
+			},
 		},
 	}, {
 		// IN clause with vals
 		in:      "select * from t where v1 in (1, '2')",
 		outstmt: "select * from t where v1 in ::bv1",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.TestBindVariable([]interface{}{1, []byte("2")}),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type: sqltypes.Tuple,
+				Values: []*querypb.Value{{
+					Type:  sqltypes.Int64,
+					Value: []byte("1"),
+				}, {
+					Type:  sqltypes.VarBinary,
+					Value: []byte("2"),
+				}},
+			},
 		},
 	}, {
 		// NOT IN clause
 		in:      "select * from t where v1 not in (1, '2')",
 		outstmt: "select * from t where v1 not in ::bv1",
-		outbv: map[string]*querypb.BindVariable{
-			"bv1": sqltypes.TestBindVariable([]interface{}{1, []byte("2")}),
+		outbv: map[string]interface{}{
+			"bv1": &querypb.BindVariable{
+				Type: sqltypes.Tuple,
+				Values: []*querypb.Value{{
+					Type:  sqltypes.Int64,
+					Value: []byte("1"),
+				}, {
+					Type:  sqltypes.VarBinary,
+					Value: []byte("2"),
+				}},
+			},
 		},
 	}}
 	for _, tc := range testcases {
@@ -124,7 +155,7 @@ func TestNormalize(t *testing.T) {
 			t.Error(err)
 			continue
 		}
-		bv := make(map[string]*querypb.BindVariable)
+		bv := make(map[string]interface{})
 		Normalize(stmt, bv, prefix)
 		outstmt := String(stmt)
 		if outstmt != tc.outstmt {

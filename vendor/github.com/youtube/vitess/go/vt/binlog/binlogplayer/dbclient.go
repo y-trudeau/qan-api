@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package binlogplayer
 
@@ -20,21 +8,19 @@ import (
 	"fmt"
 
 	log "github.com/golang/glog"
-	"golang.org/x/net/context"
-
-	"github.com/youtube/vitess/go/mysql"
+	"github.com/youtube/vitess/go/sqldb"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
 )
 
-// DBClient is a real VtClient backed by a mysql connection.
+// DBClient is a real VtClient backed by a mysql connection
 type DBClient struct {
-	dbConfig *mysql.ConnParams
-	dbConn   *mysql.Conn
+	dbConfig *sqldb.ConnParams
+	dbConn   sqldb.Conn
 }
 
 // NewDbClient creates a DBClient instance
-func NewDbClient(params *mysql.ConnParams) *DBClient {
+func NewDbClient(params *sqldb.ConnParams) *DBClient {
 	return &DBClient{
 		dbConfig: params,
 	}
@@ -42,7 +28,7 @@ func NewDbClient(params *mysql.ConnParams) *DBClient {
 
 func (dc *DBClient) handleError(err error) {
 	// log.Errorf("in DBClient handleError %v", err.(error))
-	if sqlErr, ok := err.(*mysql.SQLError); ok {
+	if sqlErr, ok := err.(*sqldb.SQLError); ok {
 		if sqlErr.Number() >= 2000 && sqlErr.Number() <= 2018 { // mysql connection errors
 			dc.Close()
 		}
@@ -58,8 +44,7 @@ func (dc *DBClient) Connect() error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	dc.dbConn, err = mysql.Connect(ctx, &params)
+	dc.dbConn, err = sqldb.Connect(params)
 	if err != nil {
 		return fmt.Errorf("error in connecting to mysql db, err %v", err)
 	}

@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package tabletserver
 
@@ -27,10 +15,9 @@ import (
 	"github.com/youtube/vitess/go/vt/concurrency"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
 	"github.com/youtube/vitess/go/vt/dtids"
-	"github.com/youtube/vitess/go/vt/proto/query"
-	"github.com/youtube/vitess/go/vt/vtgate/vtgateconn"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/connpool"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
+	"github.com/youtube/vitess/go/vt/vtgate/vtgateconn"
 )
 
 // TxEngine handles transactions.
@@ -47,14 +34,13 @@ type TxEngine struct {
 }
 
 // NewTxEngine creates a new TxEngine.
-func NewTxEngine(checker connpool.MySQLChecker, config tabletenv.TabletConfig) *TxEngine {
+func NewTxEngine(checker MySQLChecker, config tabletenv.TabletConfig) *TxEngine {
 	te := &TxEngine{
 		shutdownGracePeriod: time.Duration(config.TxShutDownGracePeriod * 1e9),
 	}
 	te.txPool = NewTxPool(
-		config.PoolNamePrefix,
+		config.PoolNamePrefix+"TransactionPool",
 		config.TransactionCap,
-		config.FoundRowsPoolSize,
 		time.Duration(config.TransactionTimeout*1e9),
 		time.Duration(config.IdleTimeout*1e9),
 		checker,
@@ -105,7 +91,7 @@ func (te *TxEngine) Open(dbconfigs dbconfigs.DBConfigs) {
 	if te.isOpen {
 		return
 	}
-	te.txPool.Open(&dbconfigs.App, &dbconfigs.Dba, &dbconfigs.AppDebug)
+	te.txPool.Open(&dbconfigs.App, &dbconfigs.Dba)
 	if !te.twopcEnabled {
 		te.isOpen = true
 		return
@@ -204,7 +190,7 @@ outer:
 		if txid > maxid {
 			maxid = txid
 		}
-		conn, err := te.txPool.LocalBegin(ctx, false, query.ExecuteOptions_DEFAULT)
+		conn, err := te.txPool.LocalBegin(ctx)
 		if err != nil {
 			allErr.RecordError(err)
 			continue
@@ -284,7 +270,7 @@ func (te *TxEngine) startWatchdog() {
 			return
 		}
 
-		coordConn, err := vtgateconn.Dial(ctx, te.coordinatorAddress, te.abandonAge/4)
+		coordConn, err := vtgateconn.Dial(ctx, te.coordinatorAddress, te.abandonAge/4, "")
 		if err != nil {
 			tabletenv.InternalErrors.Add("WatchdogFail", 1)
 			log.Errorf("Error connecting to coordinator '%v': %v", te.coordinatorAddress, err)

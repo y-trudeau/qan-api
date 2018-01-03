@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package schema
 
@@ -21,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,15 +17,16 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/youtube/vitess/go/acl"
-	"github.com/youtube/vitess/go/mysql"
+	"github.com/youtube/vitess/go/mysqlconn"
+	"github.com/youtube/vitess/go/sqldb"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/stats"
 	"github.com/youtube/vitess/go/timer"
 	"github.com/youtube/vitess/go/vt/concurrency"
 	"github.com/youtube/vitess/go/vt/sqlparser"
-	"github.com/youtube/vitess/go/vt/vterrors"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/connpool"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
+	"github.com/youtube/vitess/go/vt/vterrors"
 
 	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
 )
@@ -65,7 +55,7 @@ type Engine struct {
 var schemaOnce sync.Once
 
 // NewEngine creates a new Engine.
-func NewEngine(checker connpool.MySQLChecker, config tabletenv.TabletConfig) *Engine {
+func NewEngine(checker tabletenv.MySQLChecker, config tabletenv.TabletConfig) *Engine {
 	reloadTime := time.Duration(config.SchemaReloadTime * 1e9)
 	idleTimeout := time.Duration(config.IdleTimeout * 1e9)
 	se := &Engine{
@@ -91,7 +81,7 @@ func NewEngine(checker connpool.MySQLChecker, config tabletenv.TabletConfig) *En
 
 // Open initializes the Engine. Calling Open on an already
 // open engine is a no-op.
-func (se *Engine) Open(dbaParams *mysql.ConnParams) error {
+func (se *Engine) Open(dbaParams *sqldb.ConnParams) error {
 	se.mu.Lock()
 	defer se.mu.Unlock()
 	if se.isOpen {
@@ -100,7 +90,7 @@ func (se *Engine) Open(dbaParams *mysql.ConnParams) error {
 	start := time.Now()
 	defer log.Infof("Time taken to load the schema: %v", time.Now().Sub(start))
 	ctx := tabletenv.LocalContext()
-	se.conns.Open(dbaParams, dbaParams, dbaParams)
+	se.conns.Open(dbaParams, dbaParams)
 
 	conn, err := se.conns.Get(ctx)
 	if err != nil {
@@ -113,7 +103,7 @@ func (se *Engine) Open(dbaParams *mysql.ConnParams) error {
 		return err
 	}
 
-	tableData, err := conn.Exec(ctx, mysql.BaseShowTables, maxTableCount, false)
+	tableData, err := conn.Exec(ctx, mysqlconn.BaseShowTables, maxTableCount, false)
 	if err != nil {
 		return vterrors.Errorf(vtrpcpb.Code_UNKNOWN, "could not get table list: %v", err)
 	}
@@ -130,7 +120,7 @@ func (se *Engine) Open(dbaParams *mysql.ConnParams) error {
 				wg.Done()
 			}()
 
-			tableName := row[0].ToString()
+			tableName := row[0].String()
 			conn, err := se.conns.Get(ctx)
 			if err != nil {
 				log.Errorf("Engine.Open: connection error while reading table %s: %v", tableName, err)
@@ -141,8 +131,8 @@ func (se *Engine) Open(dbaParams *mysql.ConnParams) error {
 			table, err := LoadTable(
 				conn,
 				tableName,
-				row[1].ToString(), // table_type
-				row[3].ToString(), // table_comment
+				row[1].String(), // table_type
+				row[3].String(), // table_comment
 			)
 			if err != nil {
 				tabletenv.InternalErrors.Add("Schema", 1)
@@ -189,22 +179,6 @@ func (se *Engine) Close() {
 	se.isOpen = false
 }
 
-// MakeNonMaster clears the sequence caches to make sure that
-// they don't get accidentally reused after losing mastership.
-func (se *Engine) MakeNonMaster() {
-	// This function is tested through endtoend test.
-	se.mu.Lock()
-	defer se.mu.Unlock()
-	for _, t := range se.tables {
-		if t.SequenceInfo != nil {
-			t.SequenceInfo.Lock()
-			t.SequenceInfo.NextVal = 0
-			t.SequenceInfo.LastVal = 0
-			t.SequenceInfo.Unlock()
-		}
-	}
-}
-
 // Reload reloads the schema info from the db.
 // Any tables that have changed since the last load are updated.
 // This is a no-op if the Engine is closed.
@@ -226,7 +200,7 @@ func (se *Engine) Reload(ctx context.Context) error {
 		if err != nil {
 			return 0, nil, err
 		}
-		tableData, err := conn.Exec(ctx, mysql.BaseShowTables, maxTableCount, false)
+		tableData, err := conn.Exec(ctx, mysqlconn.BaseShowTables, maxTableCount, false)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -242,9 +216,9 @@ func (se *Engine) Reload(ctx context.Context) error {
 	rec := concurrency.AllErrorRecorder{}
 	curTables := map[string]bool{"dual": true}
 	for _, row := range tableData.Rows {
-		tableName := row[0].ToString()
+		tableName := row[0].String()
 		curTables[tableName] = true
-		createTime, _ := sqltypes.ToInt64(row[2])
+		createTime, _ := row[2].ParseInt64()
 		// Check if we know about the table or it has been recreated.
 		if _, ok := se.tables[tableName]; !ok || createTime >= se.lastChange {
 			func() {
@@ -290,9 +264,9 @@ func (se *Engine) mysqlTime(ctx context.Context, conn *connpool.DBConn) (int64, 
 	if len(tm.Rows) != 1 || len(tm.Rows[0]) != 1 || tm.Rows[0][0].IsNull() {
 		return 0, vterrors.Errorf(vtrpcpb.Code_UNKNOWN, "unexpected result for MySQL time: %+v", tm.Rows)
 	}
-	t, err := sqltypes.ToInt64(tm.Rows[0][0])
+	t, err := strconv.ParseInt(tm.Rows[0][0].String(), 10, 64)
 	if err != nil {
-		return 0, vterrors.Errorf(vtrpcpb.Code_UNKNOWN, "could not parse time %v: %v", tm, err)
+		return 0, vterrors.Errorf(vtrpcpb.Code_UNKNOWN, "could not parse time %+v: %v", tm, err)
 	}
 	return t, nil
 }
@@ -310,7 +284,7 @@ func (se *Engine) TableWasCreatedOrAltered(ctx context.Context, tableName string
 		return err
 	}
 	defer conn.Recycle()
-	tableData, err := conn.Exec(ctx, mysql.BaseShowTablesForTable(tableName), 1, false)
+	tableData, err := conn.Exec(ctx, mysqlconn.BaseShowTablesForTable(tableName), 1, false)
 	if err != nil {
 		tabletenv.InternalErrors.Add("Schema", 1)
 		return vterrors.Errorf(vtrpcpb.Code_UNKNOWN, "TableWasCreatedOrAltered: information_schema query failed for table %s: %v", tableName, err)
@@ -323,8 +297,8 @@ func (se *Engine) TableWasCreatedOrAltered(ctx context.Context, tableName string
 	table, err := LoadTable(
 		conn,
 		tableName,
-		row[1].ToString(), // table_type
-		row[3].ToString(), // table_comment
+		row[1].String(), // table_type
+		row[3].String(), // table_comment
 	)
 	if err != nil {
 		tabletenv.InternalErrors.Add("Schema", 1)

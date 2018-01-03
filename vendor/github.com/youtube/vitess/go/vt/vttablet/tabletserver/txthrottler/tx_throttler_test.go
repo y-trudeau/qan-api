@@ -1,30 +1,4 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package txthrottler
-
-// Commands to generate the mocks for this test.
-//go:generate mockgen -destination mock_toposerver_impl_test.go -package txthrottler github.com/youtube/vitess/go/vt/topo Impl
-// We need the following to fix the generated mock_impl.go, since mockgen imports the 'context'
-// package from the wrong place.
-// TODO(mberlin): Remove the next line once we use the Go 1.7 package 'context' everywhere.
-//go:generate sed -i s,github.com/youtube/vitess/vendor/,,g mock_toposerver_impl_test.go
-//go:generate mockgen -destination mock_healthcheck_test.go -package txthrottler github.com/youtube/vitess/go/vt/discovery HealthCheck
-//go:generate mockgen -destination mock_throttler_test.go -package txthrottler github.com/youtube/vitess/go/vt/vttablet/tabletserver/txthrottler ThrottlerInterface
-//go:generate mockgen -destination mock_topology_watcher_test.go -package txthrottler github.com/youtube/vitess/go/vt/vttablet/tabletserver/txthrottler TopologyWatcherInterface
 
 import (
 	"testing"
@@ -32,8 +6,8 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/youtube/vitess/go/vt/discovery"
-	"github.com/youtube/vitess/go/vt/topo"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
+	"github.com/youtube/vitess/go/vt/topo"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
@@ -143,3 +117,13 @@ func TestEnabledThrottler(t *testing.T) {
 	}
 	throttler.Close()
 }
+
+// Commands to generate the mocks for this test.
+//go:generate mockgen -destination mock_toposerver_impl_test.go -package txthrottler github.com/youtube/vitess/go/vt/topo Impl
+// We need the following to fix the generated mock_impl.go, since mockgen imports the 'context'
+// package from the wrong place.
+// TODO(mberlin): Remove the next line once we use the Go 1.7 package 'context' everywhere.
+//go:generate sed -i s,github.com/youtube/vitess/vendor/,,g mock_toposerver_impl_test.go
+//go:generate mockgen -destination mock_healthcheck_test.go -package txthrottler github.com/youtube/vitess/go/vt/discovery HealthCheck
+//go:generate mockgen -destination mock_throttler_test.go -package txthrottler github.com/youtube/vitess/go/vt/tabletserver/txthrottler ThrottlerInterface
+//go:generate mockgen -destination mock_topology_watcher_test.go -package txthrottler github.com/youtube/vitess/go/vt/tabletserver/txthrottler TopologyWatcherInterface

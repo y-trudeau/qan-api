@@ -14,12 +14,10 @@ repo: https://github.com/youtube/vitess
 sass:
   sass_dir: _sass
   style: compressed
-permalink: pretty
+permalink: /:categories/:title/
 highlighter: pygments
-plugins:
+gems:
   - jekyll-sitemap
-  - jekyll-redirect-from
-  - jekyll-seo-tag
 
 markdown: redcarpet
 
@@ -40,5 +38,4 @@ owner:
   disqus-shortname:
 
 
-exclude: ["config.rb", ".sass-cache", "Capfile", "config", "log", "Rakefile", "Rakefile.rb", "tmp", "*.sublime-project", "*.sublime-workspace", "Gemfile", "Gemfile.lock", "README.md", "LICENSE", "node_modules", "Gruntfile.js", "package.json", "preview-site.sh", "publish-site.sh"]
-
+exclude: ["config.rb", ".sass-cache", "Capfile", "config", "log", "Rakefile", "Rakefile.rb", "tmp", "*.sublime-project", "*.sublime-workspace", "Gemfile", "Gemfile.lock", "README.md", "LICENSE", "node_modules", "Gruntfile.js", "package.json"]

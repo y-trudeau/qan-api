@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package wrangler
 
@@ -34,7 +22,6 @@ import (
 
 	tabletmanagerdatapb "github.com/youtube/vitess/go/vt/proto/tabletmanagerdata"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
-	vschemapb "github.com/youtube/vitess/go/vt/proto/vschema"
 )
 
 const (
@@ -898,19 +885,13 @@ func (wr *Wrangler) DeleteKeyspace(ctx context.Context, keyspace string, recursi
 		}
 	}
 
-	// Delete the cell-global VSchema path
-	// If not remove this, vtctld web page Dashboard will Display Error
-	vschema := &vschemapb.Keyspace{}
-	if err := wr.ts.SaveVSchema(ctx, keyspace, vschema); err != nil && err != topo.ErrNoNode {
-		return err
-	}
-
 	return wr.ts.DeleteKeyspace(ctx, keyspace)
 }
 
-// RemoveKeyspaceCell will remove a cell from the Cells list in all
-// shards of a keyspace (by calling RemoveShardCell on every
-// shard). It will also remove the SrvKeyspace for that keyspace/cell.
+// RemoveKeyspaceCell will remove a cell from the Cells list in all shards of a keyspace.
+//
+// It is essentially a shortcut for calling RemoveShardCell on every shard,
+// reducing the potential for operator error when there are many shards.
 func (wr *Wrangler) RemoveKeyspaceCell(ctx context.Context, keyspace, cell string, force, recursive bool) error {
 	shards, err := wr.ts.GetShardNames(ctx, keyspace)
 	if err != nil {
@@ -922,8 +903,5 @@ func (wr *Wrangler) RemoveKeyspaceCell(ctx context.Context, keyspace, cell strin
 			return fmt.Errorf("can't remove cell %v from shard %v/%v: %v", cell, keyspace, shard, err)
 		}
 	}
-
-	// Now remove the SrvKeyspace object.
-	wr.Logger().Infof("Removing cell %v keyspace %v SrvKeyspace object", cell, keyspace)
-	return wr.ts.DeleteSrvKeyspace(ctx, cell, keyspace)
+	return nil
 }

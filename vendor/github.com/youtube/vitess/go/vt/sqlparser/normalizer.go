@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package sqlparser
 
@@ -20,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/youtube/vitess/go/sqltypes"
-
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 )
 
@@ -28,7 +15,7 @@ import (
 // updates the bind vars to those values. The supplied prefix
 // is used to generate the bind var names. The function ensures
 // that there are no collisions with existing bind vars.
-func Normalize(stmt Statement, bindVars map[string]*querypb.BindVariable, prefix string) {
+func Normalize(stmt Statement, bindVars map[string]interface{}, prefix string) {
 	reserved := GetBindvars(stmt)
 	// vals allows us to reuse bindvars for
 	// identical values.
@@ -77,7 +64,7 @@ func Normalize(stmt Statement, bindVars map[string]*querypb.BindVariable, prefix
 			// The RHS is a tuple of values.
 			// Make a list bindvar.
 			bvals := &querypb.BindVariable{
-				Type: querypb.Type_TUPLE,
+				Type: sqltypes.Tuple,
 			}
 			for _, val := range tupleVals {
 				bval := sqlToBindvar(val)
@@ -101,22 +88,14 @@ func Normalize(stmt Statement, bindVars map[string]*querypb.BindVariable, prefix
 
 func sqlToBindvar(node SQLNode) *querypb.BindVariable {
 	if node, ok := node.(*SQLVal); ok {
-		var v sqltypes.Value
-		var err error
 		switch node.Type {
 		case StrVal:
-			v, err = sqltypes.NewValue(sqltypes.VarBinary, node.Val)
+			return &querypb.BindVariable{Type: sqltypes.VarBinary, Value: node.Val}
 		case IntVal:
-			v, err = sqltypes.NewValue(sqltypes.Int64, node.Val)
+			return &querypb.BindVariable{Type: sqltypes.Int64, Value: node.Val}
 		case FloatVal:
-			v, err = sqltypes.NewValue(sqltypes.Float64, node.Val)
-		default:
-			return nil
+			return &querypb.BindVariable{Type: sqltypes.Float64, Value: node.Val}
 		}
-		if err != nil {
-			return nil
-		}
-		return sqltypes.ValueBindVariable(v)
 	}
 	return nil
 }

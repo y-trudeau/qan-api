@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2015, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package endtoend
 
@@ -23,14 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"golang.org/x/net/context"
-
-	"github.com/youtube/vitess/go/mysql"
-	"github.com/youtube/vitess/go/vt/vterrors"
-	"github.com/youtube/vitess/go/vt/vttablet/endtoend/framework"
+	"github.com/youtube/vitess/go/sqldb"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver"
+	"github.com/youtube/vitess/go/vt/vttablet/endtoend/framework"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/tabletenv"
+	"github.com/youtube/vitess/go/vt/vterrors"
 
 	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
@@ -47,7 +32,7 @@ func TestCommit(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -143,7 +128,7 @@ func TestRollback(t *testing.T) {
 	vstart := framework.DebugVars()
 
 	query := "insert into vitess_test values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -163,7 +148,7 @@ func TestRollback(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	want := []string{"insert into vitess_test(intval, floatval, charval, binval) values (4, null, null, null) /* _stream vitess_test (intval ) (4 ); */"}
+	want := []string{"insert into vitess_test values (4, null, null, null) /* _stream vitess_test (intval ) (4 ); */"}
 	if !reflect.DeepEqual(tx.Queries, want) {
 		t.Errorf("queries: %v, want %v", tx.Queries, want)
 	}
@@ -317,7 +302,7 @@ func TestTxPoolSize(t *testing.T) {
 	vstart := framework.DebugVars()
 
 	client1 := framework.NewClient()
-	err := client1.Begin(false)
+	err := client1.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -344,7 +329,7 @@ func TestTxPoolSize(t *testing.T) {
 	}
 
 	client2 := framework.NewClient()
-	err = client2.Begin(false)
+	err = client2.Begin()
 	want := "connection limit exceeded"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("%v, must contain %s", err, want)
@@ -366,7 +351,7 @@ func TestTxTimeout(t *testing.T) {
 	catcher := framework.NewTxCatcher()
 	defer catcher.Close()
 	client := framework.NewClient()
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -401,7 +386,7 @@ func TestForUpdate(t *testing.T) {
 		}
 
 		// We should not get errors here
-		err = client.Begin(false)
+		err = client.Begin()
 		if err != nil {
 			t.Error(err)
 			return
@@ -425,7 +410,7 @@ func TestPrepareRollback(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -462,7 +447,7 @@ func TestPrepareCommit(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -499,7 +484,7 @@ func TestPrepareReparentCommit(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -548,7 +533,7 @@ func TestMMCommitFlow(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 	}
@@ -580,7 +565,7 @@ func TestMMCommitFlow(t *testing.T) {
 	}
 
 	err = client.SetRollback("aa", 0)
-	want = "could not transition to ROLLBACK: aa, CallerID: dev"
+	want = "could not transition to ROLLBACK: aa"
 	if err == nil || err.Error() != want {
 		t.Errorf("%v, must contain %s", err, want)
 	}
@@ -603,7 +588,7 @@ func TestMMCommitFlow(t *testing.T) {
 			TabletType: topodatapb.TabletType_MASTER,
 		}},
 	}
-	if !proto.Equal(info, wantInfo) {
+	if !reflect.DeepEqual(info, wantInfo) {
 		t.Errorf("ReadTransaction: %#v, want %#v", info, wantInfo)
 	}
 
@@ -617,7 +602,7 @@ func TestMMCommitFlow(t *testing.T) {
 		t.Error(err)
 	}
 	wantInfo = &querypb.TransactionMetadata{}
-	if !proto.Equal(info, wantInfo) {
+	if !reflect.DeepEqual(info, wantInfo) {
 		t.Errorf("ReadTransaction: %#v, want %#v", info, wantInfo)
 	}
 }
@@ -628,7 +613,7 @@ func TestMMRollbackFlow(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 	}
@@ -672,7 +657,7 @@ func TestMMRollbackFlow(t *testing.T) {
 			TabletType: topodatapb.TabletType_MASTER,
 		}},
 	}
-	if !proto.Equal(info, wantInfo) {
+	if !reflect.DeepEqual(info, wantInfo) {
 		t.Errorf("ReadTransaction: %#v, want %#v", info, wantInfo)
 	}
 
@@ -687,7 +672,7 @@ func TestWatchdog(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 	}
@@ -750,7 +735,7 @@ func TestUnresolvedTracking(t *testing.T) {
 
 	query := "insert into vitess_test (intval, floatval, charval, binval) " +
 		"values(4, null, null, null)"
-	err := client.Begin(false)
+	err := client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -781,9 +766,7 @@ func TestManualTwopcz(t *testing.T) {
 	t.Skip()
 	client := framework.NewClient()
 	defer client.Execute("delete from vitess_test where intval=4", nil)
-
-	ctx := context.Background()
-	conn, err := mysql.Connect(ctx, &connParams)
+	conn, err := sqldb.Connect(connParams)
 	if err != nil {
 		t.Error(err)
 		return
@@ -791,7 +774,7 @@ func TestManualTwopcz(t *testing.T) {
 	defer conn.Close()
 
 	// Successful prepare.
-	err = client.Begin(false)
+	err = client.Begin()
 	if err != nil {
 		t.Error(err)
 		return
@@ -810,7 +793,7 @@ func TestManualTwopcz(t *testing.T) {
 	}
 
 	// Failed transaction.
-	err = client.Begin(false)
+	err = client.Begin()
 	if err != nil {
 		t.Error(err)
 		return

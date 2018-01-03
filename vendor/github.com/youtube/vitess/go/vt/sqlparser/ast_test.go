@@ -1,18 +1,6 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2014, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package sqlparser
 
@@ -22,8 +10,6 @@ import (
 	"reflect"
 	"testing"
 	"unsafe"
-
-	"github.com/youtube/vitess/go/sqltypes"
 )
 
 func TestAppend(t *testing.T) {
@@ -201,47 +187,6 @@ func TestIsAggregate(t *testing.T) {
 	}
 }
 
-func TestExprFromValue(t *testing.T) {
-	tcases := []struct {
-		in  sqltypes.Value
-		out SQLNode
-		err string
-	}{{
-		in:  sqltypes.NULL,
-		out: &NullVal{},
-	}, {
-		in:  sqltypes.NewInt64(1),
-		out: NewIntVal([]byte("1")),
-	}, {
-		in:  sqltypes.NewFloat64(1.1),
-		out: NewFloatVal([]byte("1.1")),
-	}, {
-		in:  sqltypes.MakeTrusted(sqltypes.Decimal, []byte("1.1")),
-		out: NewFloatVal([]byte("1.1")),
-	}, {
-		in:  sqltypes.NewVarChar("aa"),
-		out: NewStrVal([]byte("aa")),
-	}, {
-		in:  sqltypes.MakeTrusted(sqltypes.Expression, []byte("rand()")),
-		err: "cannot convert value EXPRESSION(rand()) to AST",
-	}}
-	for _, tcase := range tcases {
-		got, err := ExprFromValue(tcase.in)
-		if tcase.err != "" {
-			if err == nil || err.Error() != tcase.err {
-				t.Errorf("ExprFromValue(%v) err: %v, want %s", tcase.in, err, tcase.err)
-			}
-			continue
-		}
-		if err != nil {
-			t.Error(err)
-		}
-		if got, want := got, tcase.out; !reflect.DeepEqual(got, want) {
-			t.Errorf("ExprFromValue(%v): %v, want %s", tcase.in, got, want)
-		}
-	}
-}
-
 func TestColNameEqual(t *testing.T) {
 	var c1, c2 *ColName
 	if c1.Equal(c2) {
@@ -259,6 +204,45 @@ func TestColNameEqual(t *testing.T) {
 	c2.Name = NewColIdent("aa")
 	if !c1.Equal(c2) {
 		t.Error("columns unequal, want equal")
+	}
+}
+
+func TestTableNameEqual(t *testing.T) {
+	var t1, t2 *TableName
+	if !t1.Equal(t2) {
+		t.Error("nil tables unequal, want equal")
+	}
+	t2 = &TableName{}
+	if !t1.Equal(t2) {
+		t.Error("nil and empty table unequal, want equal")
+	}
+	if !t2.Equal(t1) {
+		t.Error("empty and nil table unequal, want equal")
+	}
+	t1 = &TableName{}
+	if !t1.Equal(t2) {
+		t.Error("empty and empty table unequal, want equal")
+	}
+	t2 = &TableName{
+		Qualifier: NewTableIdent("aa"),
+		Name:      NewTableIdent("bb"),
+	}
+	if t1.Equal(t2) {
+		t.Error("empty and non-empty table equal, want unequal")
+	}
+	if t2.Equal(t1) {
+		t.Error("non-empty and empty table equal, want unequal")
+	}
+	t1 = &TableName{
+		Qualifier: NewTableIdent("bb"),
+		Name:      NewTableIdent("bb"),
+	}
+	if t1.Equal(t2) {
+		t.Error("non-empty and non-empty table equal, want unequal")
+	}
+	t1.Qualifier = NewTableIdent("aa")
+	if !t1.Equal(t2) {
+		t.Error("tables are unequal, want equal")
 	}
 }
 

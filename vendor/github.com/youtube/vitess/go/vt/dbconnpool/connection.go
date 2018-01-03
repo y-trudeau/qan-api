@@ -1,43 +1,30 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2012, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 package dbconnpool
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
-	"golang.org/x/net/context"
-
-	"github.com/youtube/vitess/go/mysql"
+	"github.com/youtube/vitess/go/sqldb"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/stats"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
 )
 
-// DBConnection re-exposes mysql.Conn with some wrapping to implement
+// DBConnection re-exposes sqldb.Conn with some wrapping to implement
 // most of PoolConnection interface, except Recycle. That way it can be used
 // by itself. (Recycle needs to know about the Pool).
 type DBConnection struct {
-	*mysql.Conn
+	sqldb.Conn
 	mysqlStats *stats.Timings
 }
 
 func (dbc *DBConnection) handleError(err error) {
-	if sqlErr, ok := err.(*mysql.SQLError); ok {
+	if sqlErr, ok := err.(*sqldb.SQLError); ok {
 		if sqlErr.Number() >= 2000 && sqlErr.Number() <= 2018 { // mysql connection errors
 			dbc.Close()
 		}
@@ -47,7 +34,7 @@ func (dbc *DBConnection) handleError(err error) {
 	}
 }
 
-// ExecuteFetch overwrites mysql.Conn.ExecuteFetch.
+// ExecuteFetch is part of PoolConnection interface.
 func (dbc *DBConnection) ExecuteFetch(query string, maxrows int, wantfields bool) (*sqltypes.Result, error) {
 	defer dbc.mysqlStats.Record("Exec", time.Now())
 	mqr, err := dbc.Conn.ExecuteFetch(query, maxrows, wantfields)
@@ -58,7 +45,7 @@ func (dbc *DBConnection) ExecuteFetch(query string, maxrows int, wantfields bool
 	return mqr, nil
 }
 
-// ExecuteStreamFetch overwrites mysql.Conn.ExecuteStreamFetch.
+// ExecuteStreamFetch is part of PoolConnection interface.
 func (dbc *DBConnection) ExecuteStreamFetch(query string, callback func(*sqltypes.Result) error, streamBufferSize int) error {
 	defer dbc.mysqlStats.Record("ExecStream", time.Now())
 
@@ -118,14 +105,44 @@ func (dbc *DBConnection) ExecuteStreamFetch(query string, callback func(*sqltype
 	return nil
 }
 
+var (
+	getModeSQL    = "select @@global.sql_mode"
+	getAutocommit = "select @@autocommit"
+)
+
+// VerifyMode is a helper method to verify mysql is running with
+// sql_mode = STRICT_TRANS_TABLES and autocommit=ON.
+func (dbc *DBConnection) VerifyMode() error {
+	qr, err := dbc.ExecuteFetch(getModeSQL, 2, false)
+	if err != nil {
+		return fmt.Errorf("could not verify mode: %v", err)
+	}
+	if len(qr.Rows) != 1 {
+		return fmt.Errorf("incorrect rowcount received for %s: %d", getModeSQL, len(qr.Rows))
+	}
+	if !strings.Contains(qr.Rows[0][0].String(), "STRICT_TRANS_TABLES") {
+		return fmt.Errorf("require sql_mode to be STRICT_TRANS_TABLES: got %s", qr.Rows[0][0].String())
+	}
+	qr, err = dbc.ExecuteFetch(getAutocommit, 2, false)
+	if err != nil {
+		return fmt.Errorf("could not verify mode: %v", err)
+	}
+	if len(qr.Rows) != 1 {
+		return fmt.Errorf("incorrect rowcount received for %s: %d", getAutocommit, len(qr.Rows))
+	}
+	if !strings.Contains(qr.Rows[0][0].String(), "1") {
+		return fmt.Errorf("require autocommit to be 1: got %s", qr.Rows[0][0].String())
+	}
+	return nil
+}
+
 // NewDBConnection returns a new DBConnection based on the ConnParams
 // and will use the provided stats to collect timing.
-func NewDBConnection(info *mysql.ConnParams, mysqlStats *stats.Timings) (*DBConnection, error) {
+func NewDBConnection(info *sqldb.ConnParams, mysqlStats *stats.Timings) (*DBConnection, error) {
 	params, err := dbconfigs.WithCredentials(info)
 	if err != nil {
 		return nil, err
 	}
-	ctx := context.Background()
-	c, err := mysql.Connect(ctx, &params)
+	c, err := sqldb.Connect(params)
 	return &DBConnection{c, mysqlStats}, err
 }

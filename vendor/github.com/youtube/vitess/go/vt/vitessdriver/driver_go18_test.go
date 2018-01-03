@@ -1,40 +1,24 @@
+// Copyright 2016, Google Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // +build go1.8
-
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 
 // TODO(sougou): delete go1.7 tests after 1.8 becomes mainstream.
 
 package vitessdriver
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/youtube/vitess/go/sqltypes"
-	querypb "github.com/youtube/vitess/go/vt/proto/query"
-
-	"golang.org/x/net/context"
 )
 
 func TestBeginIsolation(t *testing.T) {
-	db, err := Open(testAddress, "@master", 30*time.Second)
+	db, err := Open(testAddress, "", "master", 30*time.Second)
 	if err != nil {
 		t.Error(err)
 	}
@@ -50,7 +34,7 @@ func TestBindVars(t *testing.T) {
 	var testcases = []struct {
 		desc   string
 		in     []driver.NamedValue
-		out    map[string]*querypb.BindVariable
+		out    map[string]interface{}
 		outErr string
 	}{{
 		desc: "all names",
@@ -61,9 +45,9 @@ func TestBindVars(t *testing.T) {
 			Name:  "n2",
 			Value: "abcd",
 		}},
-		out: map[string]*querypb.BindVariable{
-			"n1": sqltypes.Int64BindVariable(0),
-			"n2": sqltypes.StringBindVariable("abcd"),
+		out: map[string]interface{}{
+			"n1": int64(0),
+			"n2": "abcd",
 		},
 	}, {
 		desc: "prefixed names",
@@ -74,9 +58,9 @@ func TestBindVars(t *testing.T) {
 			Name:  "@n2",
 			Value: "abcd",
 		}},
-		out: map[string]*querypb.BindVariable{
-			"n1": sqltypes.Int64BindVariable(0),
-			"n2": sqltypes.StringBindVariable("abcd"),
+		out: map[string]interface{}{
+			"n1": int64(0),
+			"n2": "abcd",
 		},
 	}, {
 		desc: "all positional",
@@ -87,9 +71,9 @@ func TestBindVars(t *testing.T) {
 			Ordinal: 2,
 			Value:   "abcd",
 		}},
-		out: map[string]*querypb.BindVariable{
-			"v1": sqltypes.Int64BindVariable(0),
-			"v2": sqltypes.StringBindVariable("abcd"),
+		out: map[string]interface{}{
+			"v1": int64(0),
+			"v2": "abcd",
 		},
 	}, {
 		desc: "name, then position",
@@ -112,11 +96,8 @@ func TestBindVars(t *testing.T) {
 		}},
 		outErr: errNoIntermixing.Error(),
 	}}
-
-	converter := &converter{}
-
 	for _, tc := range testcases {
-		bv, err := converter.bindVarsFromNamedValues(tc.in)
+		bv, err := bindVarsFromNamedValues(tc.in)
 		if bv != nil {
 			if !reflect.DeepEqual(bv, tc.out) {
 				t.Errorf("%s: %v, want %v", tc.desc, bv, tc.out)

@@ -1,19 +1,3 @@
-/*
-Copyright 2017 Google Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreedto in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package vtctld
 
 import (
@@ -121,8 +105,7 @@ func TestAPI(t *testing.T) {
 		{"GET", "keyspaces", "", `["ks1"]`},
 		{"GET", "keyspaces/ks1", "", `{
 				"sharding_column_name": "shardcol",
-				"sharding_column_type": 0,
-				"served_froms": []
+				"sharding_column_type": 0
 			}`},
 		{"GET", "keyspaces/nonexistent", "", "404 page not found"},
 		{"POST", "keyspaces/ks1?action=TestKeyspaceAction", "", `{
@@ -135,15 +118,8 @@ func TestAPI(t *testing.T) {
 		// Shards
 		{"GET", "shards/ks1/", "", `["-80","80-"]`},
 		{"GET", "shards/ks1/-80", "", `{
-				"master_alias": null,
-				"key_range": {
-					"start": null,
-					"end":"gA=="
-				},
-				"served_types": [],
-				"source_shards": [],
-				"cells": ["cell1", "cell2"],
-				"tablet_controls": []
+				"key_range": {"end":"gA=="},
+				"cells": ["cell1", "cell2"]
 			}`},
 		{"GET", "shards/ks1/-DEAD", "", "404 page not found"},
 		{"POST", "shards/ks1/-80?action=TestShardAction", "", `{
@@ -164,22 +140,16 @@ func TestAPI(t *testing.T) {
 		{"GET", "tablets/?shard=ks1%2F-80&cell=cell2", "", `[
 				{"cell":"cell2","uid":200}
 			]`},
-		{"GET", "tablets/?shard=ks1%2F80-&cell=cell1", "", `[]`},
 		{"GET", "tablets/cell1-100", "", `{
 				"alias": {"cell": "cell1", "uid": 100},
 				"hostname": "",
+				"ip": "",
 				"port_map": {"vt": 100},
 				"keyspace": "ks1",
 				"shard": "-80",
-				"key_range": {
-					"start": null,
-					"end": "gA=="
-				},
+				"key_range": {"end": "gA=="},
 				"type": 2,
-				"db_name_override": "",
-				"tags": {},
-				"mysql_hostname":"",
-				"mysql_port":0
+				"db_name_override": ""
 			}`},
 		{"GET", "tablets/nonexistent-999", "", "404 page not found"},
 		{"POST", "tablets/cell1-100?action=TestTabletAction", "", `{
@@ -259,7 +229,7 @@ func TestAPI(t *testing.T) {
 		// vtctl RunCommand
 		{"POST", "vtctl/", `["GetKeyspace","ks1"]`, `{
 		   "Error": "",
-		   "Output": "{\n  \"sharding_column_name\": \"shardcol\",\n  \"sharding_column_type\": 0,\n  \"served_froms\": [\n  ]\n}\n\n"
+		   "Output": "{\n  \"sharding_column_name\": \"shardcol\",\n  \"sharding_column_type\": 0\n}\n\n"
 		}`},
 		{"POST", "vtctl/", `["GetKeyspace","does_not_exist"]`, `{
 		   "Error": "node doesn't exist",
@@ -303,7 +273,7 @@ func TestAPI(t *testing.T) {
 			got = strings.TrimSpace(string(body))
 		}
 		if got != want {
-			t.Errorf("[%v] got\n'%v', want\n'%v'", in.path, got, want)
+			t.Errorf("[%v] got '%v', want '%v'", in.path, got, want)
 			continue
 		}
 	}
