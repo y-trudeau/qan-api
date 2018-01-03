@@ -1,6 +1,18 @@
-// Copyright 2014, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package worker
 
@@ -34,7 +46,7 @@ type verticalDiffTabletServer struct {
 	*fakes.StreamHealthQueryService
 }
 
-func (sq *verticalDiffTabletServer) StreamExecute(ctx context.Context, target *querypb.Target, sql string, bindVariables map[string]interface{}, options *querypb.ExecuteOptions, callback func(reply *sqltypes.Result) error) error {
+func (sq *verticalDiffTabletServer) StreamExecute(ctx context.Context, target *querypb.Target, sql string, bindVariables map[string]*querypb.BindVariable, options *querypb.ExecuteOptions, callback func(reply *sqltypes.Result) error) error {
 	if !strings.Contains(sql, "moving1") {
 		sq.t.Errorf("Vertical Split Diff operation should only operate on the 'moving1' table. query: %v", sql)
 	}
@@ -66,8 +78,8 @@ func (sq *verticalDiffTabletServer) StreamExecute(ctx context.Context, target *q
 		if err := callback(&sqltypes.Result{
 			Rows: [][]sqltypes.Value{
 				{
-					sqltypes.MakeString([]byte(fmt.Sprintf("%v", i))),
-					sqltypes.MakeString([]byte(fmt.Sprintf("Text for %v", i))),
+					sqltypes.NewInt64(int64(i)),
+					sqltypes.NewVarBinary(fmt.Sprintf("Text for %v", i)),
 				},
 			},
 		}); err != nil {
@@ -117,11 +129,6 @@ func TestVerticalSplitDiff(t *testing.T) {
 	destRdonly2 := testlib.NewFakeTablet(t, wi.wr, "cell1", 12,
 		topodatapb.TabletType_RDONLY, nil, testlib.TabletKeyspaceShard(t, "destination_ks", "0"))
 
-	for _, ft := range []*testlib.FakeTablet{sourceMaster, sourceRdonly1, sourceRdonly2, destMaster, destRdonly1, destRdonly2} {
-		ft.StartActionLoop(t, wi.wr)
-		defer ft.StopActionLoop(t)
-	}
-
 	wi.wr.SetSourceShards(ctx, "destination_ks", "0", []*topodatapb.TabletAlias{sourceRdonly1.Tablet.Alias}, []string{"moving.*", "view1"})
 
 	// add the topo and schema data we'll need
@@ -167,6 +174,12 @@ func TestVerticalSplitDiff(t *testing.T) {
 			t: t,
 			StreamHealthQueryService: qs,
 		})
+	}
+
+	// Start action loop after having registered all RPC services.
+	for _, ft := range []*testlib.FakeTablet{sourceMaster, sourceRdonly1, sourceRdonly2, destMaster, destRdonly1, destRdonly2} {
+		ft.StartActionLoop(t, wi.wr)
+		defer ft.StopActionLoop(t)
 	}
 
 	// Run the vtworker command.

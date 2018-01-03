@@ -1,6 +1,18 @@
-// Copyright 2016, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package worker
 
@@ -15,7 +27,9 @@ import (
 
 	log "github.com/golang/glog"
 
+	"github.com/youtube/vitess/go/sqlescape"
 	"github.com/youtube/vitess/go/sqltypes"
+	"github.com/youtube/vitess/go/vt/grpcclient"
 	"github.com/youtube/vitess/go/vt/logutil"
 	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/vttablet/queryservice"
@@ -98,7 +112,7 @@ func (r *RestartableResultReader) getTablet() (bool, error) {
 	}
 
 	// Connect (dial) to the tablet.
-	conn, err := tabletconn.GetDialer()(tablet, *remoteActionsTimeout)
+	conn, err := tabletconn.GetDialer()(tablet, grpcclient.FailFast(false))
 	if err != nil {
 		return false /* retryable */, fmt.Errorf("failed to get dialer for tablet: %v", err)
 	}
@@ -118,7 +132,7 @@ func (r *RestartableResultReader) startStream() (bool, error) {
 		Keyspace:   r.tablet.Keyspace,
 		Shard:      r.tablet.Shard,
 		TabletType: r.tablet.Type,
-	}, r.query, make(map[string]interface{}), nil)
+	}, r.query, make(map[string]*querypb.BindVariable), nil)
 
 	// Read the fields information.
 	cols, err := stream.Recv()
@@ -252,7 +266,7 @@ func (r *RestartableResultReader) Close(ctx context.Context) {
 }
 
 func (r *RestartableResultReader) generateQuery() {
-	query := "SELECT " + strings.Join(escapeAll(r.td.Columns), ",") + " FROM " + escape(r.td.Name)
+	query := "SELECT " + strings.Join(escapeAll(r.td.Columns), ",") + " FROM " + sqlescape.EscapeID(r.td.Name)
 
 	// Build WHERE clauses.
 	var clauses []string
@@ -262,7 +276,7 @@ func (r *RestartableResultReader) generateQuery() {
 		// Initial query.
 		if !r.chunk.start.IsNull() {
 			var b bytes.Buffer
-			writeEscaped(&b, r.td.PrimaryKeyColumns[0])
+			sqlescape.WriteEscapeID(&b, r.td.PrimaryKeyColumns[0])
 			b.WriteString(">=")
 			r.chunk.start.EncodeSQL(&b)
 			clauses = append(clauses, b.String())
@@ -280,7 +294,7 @@ func (r *RestartableResultReader) generateQuery() {
 	// end value.
 	if !r.chunk.end.IsNull() {
 		var b bytes.Buffer
-		writeEscaped(&b, r.td.PrimaryKeyColumns[0])
+		sqlescape.WriteEscapeID(&b, r.td.PrimaryKeyColumns[0])
 		b.WriteString("<")
 		r.chunk.end.EncodeSQL(&b)
 		clauses = append(clauses, b.String())
@@ -321,7 +335,7 @@ func greaterThanTupleWhereClause(columns []string, row []sqltypes.Value) []strin
 	// Additional clause on the first column for multi-columns.
 	if len(columns) > 1 {
 		var b bytes.Buffer
-		writeEscaped(&b, columns[0])
+		sqlescape.WriteEscapeID(&b, columns[0])
 		b.WriteString(">=")
 		row[0].EncodeSQL(&b)
 		clauses = append(clauses, b.String())

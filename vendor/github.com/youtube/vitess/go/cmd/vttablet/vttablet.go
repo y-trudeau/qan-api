@@ -1,12 +1,25 @@
-// Copyright 2012, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 // vt tablet server: Serves queries and performs housekeeping jobs.
 package main
 
 import (
 	"flag"
+	"os"
 
 	log "github.com/golang/glog"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
@@ -35,11 +48,17 @@ func init() {
 }
 
 func main() {
-	dbconfigFlags := dbconfigs.AppConfig | dbconfigs.AllPrivsConfig | dbconfigs.DbaConfig |
+	dbconfigFlags := dbconfigs.AppConfig | dbconfigs.AppDebugConfig | dbconfigs.AllPrivsConfig | dbconfigs.DbaConfig |
 		dbconfigs.FilteredConfig | dbconfigs.ReplConfig
 	dbconfigs.RegisterFlags(dbconfigFlags)
 	mysqlctl.RegisterFlags()
 	flag.Parse()
+
+	if *servenv.Version {
+		servenv.AppVersion.Print()
+		os.Exit(0)
+	}
+
 	if len(flag.Args()) > 0 {
 		flag.Usage()
 		log.Exit("vttablet doesn't take any positional arguments")
@@ -70,9 +89,16 @@ func main() {
 		log.Warning(err)
 	}
 
+	if *tableACLConfig != "" {
+		// To override default simpleacl, other ACL plugins must set themselves to be default ACL factory
+		tableacl.Register("simpleacl", &simpleacl.Factory{})
+	} else if *enforceTableACLConfig {
+		log.Exit("table acl config has to be specified with table-acl-config flag because enforce-tableacl-config is set.")
+	}
+
 	// creates and registers the query service
 	ts := topo.Open()
-	qsc := tabletserver.NewServer(ts)
+	qsc := tabletserver.NewServer(ts, *tabletAlias)
 	servenv.OnRun(func() {
 		qsc.Register()
 		addStatusParts(qsc)
@@ -83,12 +109,6 @@ func main() {
 		qsc.StopService()
 	})
 
-	if *tableACLConfig != "" {
-		// To override default simpleacl, other ACL plugins must set themselves to be default ACL factory
-		tableacl.Register("simpleacl", &simpleacl.Factory{})
-	} else if *enforceTableACLConfig {
-		log.Exit("table acl config has to be specified with table-acl-config flag because enforce-tableacl-config is set.")
-	}
 	// tabletacl.Init loads ACL from file if *tableACLConfig is not empty
 	err = tableacl.Init(
 		*tableACLConfig,
@@ -120,6 +140,9 @@ func main() {
 	}
 
 	servenv.OnClose(func() {
+		// stop the agent so that our topo entry gets pruned properly
+		agent.Close()
+
 		// We will still use the topo server during lameduck period
 		// to update our state, so closing it in OnClose()
 		ts.Close()

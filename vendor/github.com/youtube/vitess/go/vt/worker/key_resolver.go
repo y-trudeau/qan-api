@@ -1,6 +1,18 @@
-// Copyright 2015, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package worker
 
@@ -64,9 +76,9 @@ func (r *v2Resolver) keyspaceID(row []sqltypes.Value) ([]byte, error) {
 	v := row[r.shardingColumnIndex]
 	switch r.keyspaceInfo.ShardingColumnType {
 	case topodatapb.KeyspaceIdType_BYTES:
-		return v.Raw(), nil
+		return v.ToBytes(), nil
 	case topodatapb.KeyspaceIdType_UINT64:
-		i, err := v.ParseUint64()
+		i, err := sqltypes.ToUint64(v)
 		if err != nil {
 			return nil, fmt.Errorf("Non numerical value: %v", err)
 		}
@@ -108,9 +120,9 @@ func newV3ResolverFromTableDefinition(keyspaceSchema *vindexes.KeyspaceSchema, t
 	}
 
 	// Find the sharding key column index.
-	columnIndex, ok := tmutils.TableDefinitionGetColumn(td, colVindex.Column.String())
+	columnIndex, ok := tmutils.TableDefinitionGetColumn(td, colVindex.Columns[0].String())
 	if !ok {
-		return nil, fmt.Errorf("table %v has a Vindex on unknown column %v", td.Name, colVindex.Column)
+		return nil, fmt.Errorf("table %v has a Vindex on unknown column %v", td.Name, colVindex.Columns[0])
 	}
 
 	return &v3Resolver{
@@ -142,13 +154,13 @@ func newV3ResolverFromColumnList(keyspaceSchema *vindexes.KeyspaceSchema, name s
 	// Find the sharding key column index.
 	columnIndex := -1
 	for i, n := range columns {
-		if colVindex.Column.EqualString(n) {
+		if colVindex.Columns[0].EqualString(n) {
 			columnIndex = i
 			break
 		}
 	}
 	if columnIndex == -1 {
-		return nil, fmt.Errorf("table %v has a Vindex on unknown column %v", name, colVindex.Column)
+		return nil, fmt.Errorf("table %v has a Vindex on unknown column %v", name, colVindex.Columns[0])
 	}
 
 	return &v3Resolver{
@@ -160,13 +172,16 @@ func newV3ResolverFromColumnList(keyspaceSchema *vindexes.KeyspaceSchema, name s
 // keyspaceID implements the keyspaceIDResolver interface.
 func (r *v3Resolver) keyspaceID(row []sqltypes.Value) ([]byte, error) {
 	v := row[r.shardingColumnIndex]
-	ids := []interface{}{v}
+	ids := []sqltypes.Value{v}
 	ksids, err := r.vindex.Map(nil, ids)
 	if err != nil {
 		return nil, err
 	}
 	if len(ksids) != 1 {
-		return nil, fmt.Errorf("maping row to keyspace id returned an invalid array of keyspace ids: %v", ksids)
+		return nil, fmt.Errorf("mapping row to keyspace id returned an invalid array of keyspace ids: %v", ksids)
+	}
+	if ksids[0] == nil {
+		return nil, fmt.Errorf("could not map %v to a keyspace id", v)
 	}
 	return ksids[0], nil
 }

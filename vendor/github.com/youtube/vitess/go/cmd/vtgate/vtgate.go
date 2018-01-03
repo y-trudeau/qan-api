@@ -1,12 +1,25 @@
-// Copyright 2012, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package main
 
 import (
 	"flag"
 	"math/rand"
+	"os"
 	"strings"
 	"time"
 
@@ -25,12 +38,11 @@ import (
 )
 
 var (
-	cell                   = flag.String("cell", "test_nj", "cell to use")
-	retryCount             = flag.Int("retry-count", 2, "retry count")
-	healthCheckConnTimeout = flag.Duration("healthcheck_conn_timeout", 3*time.Second, "healthcheck connection timeout")
-	healthCheckRetryDelay  = flag.Duration("healthcheck_retry_delay", 2*time.Millisecond, "health check retry delay")
-	healthCheckTimeout     = flag.Duration("healthcheck_timeout", time.Minute, "the health check timeout period")
-	tabletTypesToWait      = flag.String("tablet_types_to_wait", "", "wait till connected for specified tablet types during Gateway initialization")
+	cell                  = flag.String("cell", "test_nj", "cell to use")
+	retryCount            = flag.Int("retry-count", 2, "retry count")
+	healthCheckRetryDelay = flag.Duration("healthcheck_retry_delay", 2*time.Millisecond, "health check retry delay")
+	healthCheckTimeout    = flag.Duration("healthcheck_timeout", time.Minute, "the health check timeout period")
+	tabletTypesToWait     = flag.String("tablet_types_to_wait", "", "wait till connected for specified tablet types during Gateway initialization")
 )
 
 var resilientSrvTopoServer *vtgate.ResilientSrvTopoServer
@@ -49,6 +61,11 @@ func main() {
 	flag.Parse()
 	servenv.Init()
 
+	if *servenv.Version {
+		servenv.AppVersion.Print()
+		os.Exit(0)
+	}
+
 	if initFakeZK != nil {
 		initFakeZK()
 	}
@@ -57,7 +74,7 @@ func main() {
 
 	resilientSrvTopoServer = vtgate.NewResilientSrvTopoServer(ts, "ResilientSrvTopoServer")
 
-	healthCheck = discovery.NewHealthCheck(*healthCheckConnTimeout, *healthCheckRetryDelay, *healthCheckTimeout)
+	healthCheck = discovery.NewHealthCheck(*healthCheckRetryDelay, *healthCheckTimeout)
 	healthCheck.RegisterStats()
 
 	tabletTypes := make([]topodatapb.TabletType, 0, 1)

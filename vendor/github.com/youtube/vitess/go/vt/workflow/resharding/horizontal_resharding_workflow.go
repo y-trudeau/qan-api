@@ -1,3 +1,19 @@
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreedto in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package resharding
 
 // Package resharding contains a workflow for automatic horizontal resharding.
@@ -193,7 +209,7 @@ func createUINodes(rootNode *workflow.Node, phaseName PhaseType, shards []string
 }
 
 // initCheckpoint initialize the checkpoint for the horizontal workflow.
-func initCheckpoint(ts topo.Server, keyspace string, vtworkers []string) (*workflowpb.WorkflowCheckpoint, error) {
+func initCheckpoint(ts *topo.Server, keyspace string, vtworkers []string) (*workflowpb.WorkflowCheckpoint, error) {
 	sourceShards, destinationShards, err := findSourceAndDestinationShards(ts, keyspace)
 	if err != nil {
 		return nil, err
@@ -201,7 +217,7 @@ func initCheckpoint(ts topo.Server, keyspace string, vtworkers []string) (*workf
 	return initCheckpointFromShards(keyspace, vtworkers, sourceShards, destinationShards)
 }
 
-func findSourceAndDestinationShards(ts topo.Server, keyspace string) ([]string, []string, error) {
+func findSourceAndDestinationShards(ts *topo.Server, keyspace string) ([]string, []string, error) {
 	overlappingShards, err := topotools.FindOverlappingShards(context.Background(), ts, keyspace)
 	if err != nil {
 		return nil, nil, err
@@ -310,7 +326,7 @@ type HorizontalReshardingWorkflow struct {
 	ctx        context.Context
 	wr         ReshardingWrangler
 	manager    *workflow.Manager
-	topoServer topo.Server
+	topoServer *topo.Server
 	wi         *topo.WorkflowInfo
 	// logger is the logger we export UI logs from.
 	logger *logutil.MemoryLogger

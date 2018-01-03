@@ -1,6 +1,18 @@
-// Copyright 2012, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 //  Generate my.cnf files from templates.
 
@@ -144,8 +156,8 @@ func (cnf *Mycnf) fillMycnfTemplate(tmplSrc string) (string, error) {
 // The value assigned to ServerID will be in the range [100, 2^31):
 // - It avoids 0 because that's reserved for mysqlbinlog dumps.
 // - It also avoids 1-99 because low numbers are used for fake slave
-// connections.  See NewSlaveConnection() in slave_connection.go for
-// more on that.
+// connections.  See NewSlaveConnection() in binlog/slave_connection.go
+// for more on that.
 // - It avoids the 2^31 - 2^32-1 range, as there seems to be some
 // confusion there. The main MySQL documentation at:
 // http://dev.mysql.com/doc/refman/5.7/en/replication-options.html

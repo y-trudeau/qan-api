@@ -1,6 +1,18 @@
-// Copyright 2015, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package sqltypes
 
@@ -19,14 +31,14 @@ func TestRepair(t *testing.T) {
 	}}
 	in := Result{
 		Rows: [][]Value{
-			{testVal(VarBinary, "1"), testVal(VarBinary, "aa")},
-			{testVal(VarBinary, "2"), testVal(VarBinary, "bb")},
+			{TestValue(VarBinary, "1"), TestValue(VarBinary, "aa")},
+			{TestValue(VarBinary, "2"), TestValue(VarBinary, "bb")},
 		},
 	}
 	want := Result{
 		Rows: [][]Value{
-			{testVal(Int64, "1"), testVal(VarChar, "aa")},
-			{testVal(Int64, "2"), testVal(VarChar, "bb")},
+			{TestValue(Int64, "1"), TestValue(VarChar, "aa")},
+			{TestValue(Int64, "2"), TestValue(VarChar, "bb")},
 		},
 	}
 	in.Repair(fields)
@@ -45,31 +57,9 @@ func TestCopy(t *testing.T) {
 		InsertID:     1,
 		RowsAffected: 2,
 		Rows: [][]Value{
-			{testVal(Int64, "1"), MakeTrusted(Null, nil)},
-			{testVal(Int64, "2"), MakeTrusted(VarChar, nil)},
-			{testVal(Int64, "3"), testVal(VarChar, "")},
-		},
-		Extras: &querypb.ResultExtras{
-			EventToken: &querypb.EventToken{
-				Timestamp: 123,
-				Shard:     "sh",
-				Position:  "po",
-			},
-			Fresher: true,
-		},
-	}
-	want := &Result{
-		Fields: []*querypb.Field{{
-			Type: Int64,
-		}, {
-			Type: VarChar,
-		}},
-		InsertID:     1,
-		RowsAffected: 2,
-		Rows: [][]Value{
-			{testVal(Int64, "1"), MakeTrusted(Null, nil)},
-			{testVal(Int64, "2"), testVal(VarChar, "")},
-			{testVal(Int64, "3"), testVal(VarChar, "")},
+			{TestValue(Int64, "1"), MakeTrusted(Null, nil)},
+			{TestValue(Int64, "2"), MakeTrusted(VarChar, nil)},
+			{TestValue(Int64, "3"), TestValue(VarChar, "")},
 		},
 		Extras: &querypb.ResultExtras{
 			EventToken: &querypb.EventToken{
@@ -81,11 +71,8 @@ func TestCopy(t *testing.T) {
 		},
 	}
 	out := in.Copy()
-	// Change in so we're sure out got actually copied
-	in.Fields[0].Type = VarChar
-	in.Rows[0][0] = testVal(VarChar, "aa")
-	if !reflect.DeepEqual(out, want) {
-		t.Errorf("Copy:\n%#v, want\n%#v", out, want)
+	if !reflect.DeepEqual(out, in) {
+		t.Errorf("Copy:\n%v, want\n%v", out, in)
 	}
 }
 

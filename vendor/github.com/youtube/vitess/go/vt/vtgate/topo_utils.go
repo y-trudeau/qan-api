@@ -1,20 +1,32 @@
-// Copyright 2013, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package vtgate
 
 import (
 	"encoding/hex"
+	"sort"
 
-	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/key"
 	"github.com/youtube/vitess/go/vt/topo"
 	"github.com/youtube/vitess/go/vt/topo/topoproto"
 	"github.com/youtube/vitess/go/vt/vterrors"
-	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/querytypes"
 	"golang.org/x/net/context"
 
+	querypb "github.com/youtube/vitess/go/vt/proto/query"
 	topodatapb "github.com/youtube/vitess/go/vt/proto/topodata"
 	vtgatepb "github.com/youtube/vitess/go/vt/proto/vtgate"
 	vtrpcpb "github.com/youtube/vitess/go/vt/proto/vtrpc"
@@ -56,6 +68,7 @@ func getAllKeyspaces(ctx context.Context, topoServ topo.SrvTopoServer, cell stri
 	if err != nil {
 		return nil, vterrors.Errorf(vtrpcpb.Code_UNKNOWN, "keyspace names fetch error: %v", err)
 	}
+	sort.Strings(keyspaces)
 
 	return keyspaces, nil
 }
@@ -97,22 +110,18 @@ func getShardForKeyspaceID(allShards []*topodatapb.ShardReference, keyspaceID []
 	return "", vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "KeyspaceId %v didn't match any shards %+v", hex.EncodeToString(keyspaceID), allShards)
 }
 
-func mapEntityIdsToShards(ctx context.Context, topoServ topo.SrvTopoServer, cell, keyspace string, entityIds []*vtgatepb.ExecuteEntityIdsRequest_EntityId, tabletType topodatapb.TabletType) (string, map[string][]interface{}, error) {
+func mapEntityIdsToShards(ctx context.Context, topoServ topo.SrvTopoServer, cell, keyspace string, entityIds []*vtgatepb.ExecuteEntityIdsRequest_EntityId, tabletType topodatapb.TabletType) (string, map[string][]*querypb.Value, error) {
 	keyspace, _, allShards, err := getKeyspaceShards(ctx, topoServ, cell, keyspace, tabletType)
 	if err != nil {
 		return "", nil, err
 	}
-	var shards = make(map[string][]interface{})
+	var shards = make(map[string][]*querypb.Value)
 	for _, eid := range entityIds {
 		shard, err := getShardForKeyspaceID(allShards, eid.KeyspaceId)
 		if err != nil {
 			return "", nil, err
 		}
-		v, err := sqltypes.ValueFromBytes(eid.Type, eid.Value)
-		if err != nil {
-			return "", nil, err
-		}
-		shards[shard] = append(shards[shard], v.ToNative())
+		shards[shard] = append(shards[shard], &querypb.Value{Type: eid.Type, Value: eid.Value})
 	}
 	return keyspace, shards, nil
 }
@@ -191,11 +200,7 @@ func boundShardQueriesToScatterBatchRequest(boundQueries []*vtgatepb.BoundShardQ
 				}
 				requests.Requests[key] = request
 			}
-			bq, err := querytypes.Proto3ToBoundQuery(boundQuery.Query)
-			if err != nil {
-				return nil, err
-			}
-			request.Queries = append(request.Queries, *bq)
+			request.Queries = append(request.Queries, boundQuery.Query)
 			request.ResultIndexes = append(request.ResultIndexes, i)
 		}
 	}

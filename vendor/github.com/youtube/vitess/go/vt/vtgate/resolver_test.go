@@ -1,6 +1,18 @@
-// Copyright 2012, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 // Package vtgate provides query routing rpc services
 // for vttablets.
@@ -202,8 +214,8 @@ func testResolverGeneric(t *testing.T, name string, action func(res *Resolver) (
 	sbc0.MustFailCodes[vtrpcpb.Code_INVALID_ARGUMENT] = 1
 	sbc1.MustFailCodes[vtrpcpb.Code_INTERNAL] = 1
 	_, err = action(res)
-	want1 := fmt.Sprintf("target: %s.-20.master, used tablet: (alias:<cell:\"aa\" > hostname:\"-20\" port_map:<key:\"vt\" value:1 > keyspace:\"%s\" shard:\"-20\" type:MASTER ), INVALID_ARGUMENT error", name, name)
-	want2 := fmt.Sprintf("target: %s.20-40.master, used tablet: (alias:<cell:\"aa\" > hostname:\"20-40\" port_map:<key:\"vt\" value:1 > keyspace:\"%s\" shard:\"20-40\" type:MASTER ), INTERNAL error", name, name)
+	want1 := fmt.Sprintf("target: %s.-20.master, used tablet: aa-0 (-20), INVALID_ARGUMENT error", name)
+	want2 := fmt.Sprintf("target: %s.20-40.master, used tablet: aa-0 (20-40), INTERNAL error", name)
 	want := []string{want1, want2}
 	sort.Strings(want)
 	if err == nil {
@@ -235,8 +247,8 @@ func testResolverGeneric(t *testing.T, name string, action func(res *Resolver) (
 	sbc0.MustFailCodes[vtrpcpb.Code_FAILED_PRECONDITION] = 1
 	sbc1.MustFailCodes[vtrpcpb.Code_FAILED_PRECONDITION] = 1
 	_, err = action(res)
-	want1 = fmt.Sprintf("target: %s.-20.master, used tablet: (alias:<cell:\"aa\" > hostname:\"-20\" port_map:<key:\"vt\" value:1 > keyspace:\"%s\" shard:\"-20\" type:MASTER ), FAILED_PRECONDITION error", name, name)
-	want2 = fmt.Sprintf("target: %s.20-40.master, used tablet: (alias:<cell:\"aa\" > hostname:\"20-40\" port_map:<key:\"vt\" value:1 > keyspace:\"%s\" shard:\"20-40\" type:MASTER ), FAILED_PRECONDITION error", name, name)
+	want1 = fmt.Sprintf("target: %s.-20.master, used tablet: aa-0 (-20), FAILED_PRECONDITION error", name)
+	want2 = fmt.Sprintf("target: %s.20-40.master, used tablet: aa-0 (20-40), FAILED_PRECONDITION error", name)
 	want = []string{want1, want2}
 	sort.Strings(want)
 	if err == nil {
@@ -380,7 +392,7 @@ func testResolverStreamGeneric(t *testing.T, name string, action func(res *Resol
 	hc.AddTestTablet("aa", "20-40", 1, name, "20-40", topodatapb.TabletType_MASTER, true, 1, nil)
 	sbc0.MustFailCodes[vtrpcpb.Code_INTERNAL] = 1
 	_, err = action(res)
-	want := fmt.Sprintf("target: %s.-20.master, used tablet: (alias:<cell:\"aa\" > hostname:\"-20\" port_map:<key:\"vt\" value:1 > keyspace:\"%s\" shard:\"-20\" type:MASTER ), INTERNAL error", name, name)
+	want := fmt.Sprintf("target: %s.-20.master, used tablet: aa-0 (-20), INTERNAL error", name)
 	if err == nil || err.Error() != want {
 		t.Errorf("want\n%s\ngot\n%v", want, err)
 	}
@@ -391,6 +403,95 @@ func testResolverStreamGeneric(t *testing.T, name string, action func(res *Resol
 	// Ensure that we tried topo only once
 	if s.SrvKeyspaceCounter != 1 {
 		t.Errorf("want 1, got %v", s.SrvKeyspaceCounter)
+	}
+}
+
+func TestResolverMessageAckSharded(t *testing.T) {
+	name := "TestResolverMessageAckSharded"
+	_ = createSandbox(name)
+	hc := discovery.NewFakeHealthCheck()
+	res := newTestResolver(hc, new(sandboxTopo), "aa")
+	sbc0 := hc.AddTestTablet("aa", "1.1.1.1", 1001, name, "-20", topodatapb.TabletType_MASTER, true, 1, nil)
+	sbc1 := hc.AddTestTablet("aa", "1.1.1.1", 1002, name, "20-40", topodatapb.TabletType_MASTER, true, 1, nil)
+
+	sbc0.MessageIDs = nil
+	sbc1.MessageIDs = nil
+	idKeyspaceIDs := []*vtgatepb.IdKeyspaceId{
+		{
+			Id: &querypb.Value{
+				Type:  sqltypes.VarChar,
+				Value: []byte("1"),
+			},
+			KeyspaceId: []byte{0x10},
+		},
+		{
+			Id: &querypb.Value{
+				Type:  sqltypes.VarChar,
+				Value: []byte("3"),
+			},
+			KeyspaceId: []byte{0x30},
+		},
+	}
+	count, err := res.MessageAckKeyspaceIds(context.Background(), name, "user", idKeyspaceIDs)
+	if err != nil {
+		t.Error(err)
+	}
+	if count != 2 {
+		t.Errorf("count: %d, want 2", count)
+	}
+	wantids := []*querypb.Value{{
+		Type:  sqltypes.VarChar,
+		Value: []byte("1"),
+	}}
+	if !sqltypes.Proto3ValuesEqual(sbc0.MessageIDs, wantids) {
+		t.Errorf("sbc0.MessageIDs: %+v, want %+v\n", sbc0.MessageIDs, wantids)
+	}
+	wantids = []*querypb.Value{{
+		Type:  sqltypes.VarChar,
+		Value: []byte("3"),
+	}}
+	if !sqltypes.Proto3ValuesEqual(sbc1.MessageIDs, wantids) {
+		t.Errorf("sbc1.MessageIDs: %+v, want %+v\n", sbc1.MessageIDs, wantids)
+	}
+}
+
+func TestResolverMessageAckUnsharded(t *testing.T) {
+	createSandbox(KsTestUnsharded)
+	hc := discovery.NewFakeHealthCheck()
+	res := newTestResolver(hc, new(sandboxTopo), "aa")
+	sbc0 := hc.AddTestTablet("aa", "1.1.1.1", 1001, KsTestUnsharded, "0", topodatapb.TabletType_MASTER, true, 1, nil)
+
+	sbc0.MessageIDs = nil
+	idKeyspaceIDs := []*vtgatepb.IdKeyspaceId{
+		{
+			Id: &querypb.Value{
+				Type:  sqltypes.VarChar,
+				Value: []byte("1"),
+			},
+		},
+		{
+			Id: &querypb.Value{
+				Type:  sqltypes.VarChar,
+				Value: []byte("3"),
+			},
+		},
+	}
+	count, err := res.MessageAckKeyspaceIds(context.Background(), KsTestUnsharded, "user", idKeyspaceIDs)
+	if err != nil {
+		t.Error(err)
+	}
+	if count != 2 {
+		t.Errorf("count: %d, want 2", count)
+	}
+	wantids := []*querypb.Value{{
+		Type:  sqltypes.VarChar,
+		Value: []byte("1"),
+	}, {
+		Type:  sqltypes.VarChar,
+		Value: []byte("3"),
+	}}
+	if !sqltypes.Proto3ValuesEqual(sbc0.MessageIDs, wantids) {
+		t.Errorf("sbc0.MessageIDs: %+v, want %+v\n", sbc0.MessageIDs, wantids)
 	}
 }
 
@@ -422,22 +523,33 @@ func TestResolverInsertSqlClause(t *testing.T) {
 }
 
 func TestResolverBuildEntityIds(t *testing.T) {
-	shardMap := make(map[string][]interface{})
-	shardMap["-20"] = []interface{}{"0", 1}
-	shardMap["20-40"] = []interface{}{"2"}
+	shardMap := map[string][]*querypb.Value{
+		"-20": {{
+			Type:  querypb.Type_VARCHAR,
+			Value: []byte("0"),
+		}, {
+			Type:  querypb.Type_INT64,
+			Value: []byte("1"),
+		}},
+		"20-40": {{
+			Type:  querypb.Type_VARCHAR,
+			Value: []byte("2"),
+		}},
+	}
 	sql := "select a from table where id=:id"
 	entityColName := "uid"
-	bindVar := make(map[string]interface{})
-	bindVar["id"] = 10
+	bindVar := map[string]*querypb.BindVariable{
+		"id": sqltypes.Int64BindVariable(10),
+	}
 	shards, sqls, bindVars := buildEntityIds(shardMap, sql, entityColName, bindVar)
 	wantShards := []string{"-20", "20-40"}
 	wantSqls := map[string]string{
 		"-20":   "select a from table where id=:id and uid in ::uid_entity_ids",
 		"20-40": "select a from table where id=:id and uid in ::uid_entity_ids",
 	}
-	wantBindVars := map[string]map[string]interface{}{
-		"-20":   {"id": 10, "uid_entity_ids": []interface{}{"0", 1}},
-		"20-40": {"id": 10, "uid_entity_ids": []interface{}{"2"}},
+	wantBindVars := map[string]map[string]*querypb.BindVariable{
+		"-20":   {"id": sqltypes.Int64BindVariable(10), "uid_entity_ids": sqltypes.TestBindVariable([]interface{}{"0", 1})},
+		"20-40": {"id": sqltypes.Int64BindVariable(10), "uid_entity_ids": sqltypes.TestBindVariable([]interface{}{"2"})},
 	}
 	sort.Strings(wantShards)
 	sort.Strings(shards)
@@ -448,7 +560,7 @@ func TestResolverBuildEntityIds(t *testing.T) {
 		t.Errorf("want %+v, got %+v", wantSqls, sqls)
 	}
 	if !reflect.DeepEqual(wantBindVars, bindVars) {
-		t.Errorf("want %+v, got %+v", wantBindVars, bindVars)
+		t.Errorf("want\n%+v, got\n%+v", wantBindVars, bindVars)
 	}
 }
 
@@ -499,7 +611,7 @@ func TestResolverExecBatchReresolve(t *testing.T) {
 	}
 
 	_, err := res.ExecuteBatch(context.Background(), topodatapb.TabletType_MASTER, false, nil, nil, buildBatchRequest)
-	want := "target: TestResolverExecBatchReresolve.0.master, used tablet: (alias:<cell:\"aa\" > hostname:\"0\" port_map:<key:\"vt\" value:1 > keyspace:\"TestResolverExecBatchReresolve\" shard:\"0\" type:MASTER ), FAILED_PRECONDITION error"
+	want := "target: TestResolverExecBatchReresolve.0.master, used tablet: aa-0 (0), FAILED_PRECONDITION error"
 	if err == nil || err.Error() != want {
 		t.Errorf("want %s, got %v", want, err)
 	}
@@ -536,7 +648,7 @@ func TestResolverExecBatchAsTransaction(t *testing.T) {
 	}
 
 	_, err := res.ExecuteBatch(context.Background(), topodatapb.TabletType_MASTER, true, nil, nil, buildBatchRequest)
-	want := "target: TestResolverExecBatchAsTransaction.0.master, used tablet: (alias:<cell:\"aa\" > hostname:\"0\" port_map:<key:\"vt\" value:1 > keyspace:\"TestResolverExecBatchAsTransaction\" shard:\"0\" type:MASTER ), INTERNAL error"
+	want := "target: TestResolverExecBatchAsTransaction.0.master, used tablet: aa-0 (0), INTERNAL error"
 	if err == nil || err.Error() != want {
 		t.Errorf("want %v, got %v", want, err)
 	}

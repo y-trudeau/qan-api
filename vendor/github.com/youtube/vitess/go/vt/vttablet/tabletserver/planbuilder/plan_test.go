@@ -1,6 +1,18 @@
-// Copyright 2012, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package planbuilder
 
@@ -18,6 +30,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/testfiles"
 	"github.com/youtube/vitess/go/vt/sqlparser"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/schema"
@@ -29,35 +42,33 @@ import (
 // golden files e.g. data/test/tabletserver/exec_cases.txt.)
 func toJSON(p *Plan) ([]byte, error) {
 	mplan := struct {
-		PlanID               PlanType
-		Reason               ReasonType             `json:",omitempty"`
-		TableName            sqlparser.TableIdent   `json:",omitempty"`
-		FieldQuery           *sqlparser.ParsedQuery `json:",omitempty"`
-		FullQuery            *sqlparser.ParsedQuery `json:",omitempty"`
-		OuterQuery           *sqlparser.ParsedQuery `json:",omitempty"`
-		Subquery             *sqlparser.ParsedQuery `json:",omitempty"`
-		UpsertQuery          *sqlparser.ParsedQuery `json:",omitempty"`
-		ColumnNumbers        []int                  `json:",omitempty"`
-		PKValues             []interface{}          `json:",omitempty"`
-		SecondaryPKValues    []interface{}          `json:",omitempty"`
-		WhereClause          *sqlparser.ParsedQuery `json:",omitempty"`
-		SubqueryPKColumns    []int                  `json:",omitempty"`
-		MessageReloaderQuery *sqlparser.ParsedQuery `json:",omitempty"`
+		PlanID            PlanType
+		Reason            ReasonType             `json:",omitempty"`
+		TableName         sqlparser.TableIdent   `json:",omitempty"`
+		FieldQuery        *sqlparser.ParsedQuery `json:",omitempty"`
+		FullQuery         *sqlparser.ParsedQuery `json:",omitempty"`
+		OuterQuery        *sqlparser.ParsedQuery `json:",omitempty"`
+		Subquery          *sqlparser.ParsedQuery `json:",omitempty"`
+		UpsertQuery       *sqlparser.ParsedQuery `json:",omitempty"`
+		ColumnNumbers     []int                  `json:",omitempty"`
+		PKValues          []sqltypes.PlanValue   `json:",omitempty"`
+		SecondaryPKValues []sqltypes.PlanValue   `json:",omitempty"`
+		WhereClause       *sqlparser.ParsedQuery `json:",omitempty"`
+		SubqueryPKColumns []int                  `json:",omitempty"`
 	}{
-		PlanID:               p.PlanID,
-		Reason:               p.Reason,
-		TableName:            p.TableName(),
-		FieldQuery:           p.FieldQuery,
-		FullQuery:            p.FullQuery,
-		OuterQuery:           p.OuterQuery,
-		Subquery:             p.Subquery,
-		UpsertQuery:          p.UpsertQuery,
-		ColumnNumbers:        p.ColumnNumbers,
-		PKValues:             p.PKValues,
-		SecondaryPKValues:    p.SecondaryPKValues,
-		WhereClause:          p.WhereClause,
-		SubqueryPKColumns:    p.SubqueryPKColumns,
-		MessageReloaderQuery: p.MessageReloaderQuery,
+		PlanID:            p.PlanID,
+		Reason:            p.Reason,
+		TableName:         p.TableName(),
+		FieldQuery:        p.FieldQuery,
+		FullQuery:         p.FullQuery,
+		OuterQuery:        p.OuterQuery,
+		Subquery:          p.Subquery,
+		UpsertQuery:       p.UpsertQuery,
+		ColumnNumbers:     p.ColumnNumbers,
+		PKValues:          p.PKValues,
+		SecondaryPKValues: p.SecondaryPKValues,
+		WhereClause:       p.WhereClause,
+		SubqueryPKColumns: p.SubqueryPKColumns,
 	}
 	return json.Marshal(&mplan)
 }
@@ -162,6 +173,39 @@ func TestDDLPlan(t *testing.T) {
 	}
 }
 
+func TestMessageStreamingPlan(t *testing.T) {
+	testSchema := loadSchema("schema_test.json")
+	plan, err := BuildMessageStreaming("msg", testSchema)
+	if err != nil {
+		t.Error(err)
+	}
+	bout, _ := toJSON(plan)
+	planJSON := string(bout)
+
+	wantPlan := &Plan{
+		PlanID: PlanMessageStream,
+		Table:  testSchema["msg"],
+	}
+	bout, _ = toJSON(wantPlan)
+	wantJSON := string(bout)
+
+	if planJSON != wantJSON {
+		t.Errorf("BuildMessageStreaming: \n%s, want\n%s", planJSON, wantJSON)
+	}
+
+	_, err = BuildMessageStreaming("absent", testSchema)
+	want := "table absent not found in schema"
+	if err == nil || err.Error() != want {
+		t.Errorf("BuildMessageStreaming(absent) error: %v, want %s", err, want)
+	}
+
+	_, err = BuildMessageStreaming("a", testSchema)
+	want = "'a' is not a message table"
+	if err == nil || err.Error() != want {
+		t.Errorf("BuildMessageStreaming(absent) error: %v, want %s", err, want)
+	}
+}
+
 func matchString(t *testing.T, line int, expected interface{}, actual string) {
 	if expected != nil {
 		if expected.(string) != actual {
@@ -175,7 +219,7 @@ func loadSchema(name string) map[string]*schema.Table {
 	if err != nil {
 		panic(err)
 	}
-	tables := make([]*schema.Table, 0, 8)
+	tables := make([]*schema.Table, 0, 10)
 	err = json.Unmarshal(b, &tables)
 	if err != nil {
 		panic(err)

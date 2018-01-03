@@ -1,9 +1,30 @@
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreedto in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package vindexes
 
 import (
 	"bytes"
 	"crypto/md5"
-	"fmt"
+
+	"github.com/youtube/vitess/go/sqltypes"
+)
+
+var (
+	_ Functional = (*BinaryMD5)(nil)
 )
 
 // BinaryMD5 is a vindex that hashes binary bits to a keyspace id.
@@ -27,41 +48,21 @@ func (vind *BinaryMD5) Cost() int {
 }
 
 // Verify returns true if ids maps to ksids.
-func (vind *BinaryMD5) Verify(_ VCursor, ids []interface{}, ksids [][]byte) (bool, error) {
-	if len(ids) != len(ksids) {
-		return false, fmt.Errorf("BinaryMD5_hash.Verify: length of ids %v doesn't match length of ksids %v", len(ids), len(ksids))
-	}
-	for rowNum := range ids {
-		data, err := binHashKey(ids[rowNum])
-		if err != nil {
-			return false, fmt.Errorf("BinaryMD5_hash.Verify: %v", err)
-		}
-		if bytes.Compare(data, ksids[rowNum]) != 0 {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// Map returns the corresponding keyspace id values for the given ids.
-func (vind *BinaryMD5) Map(_ VCursor, ids []interface{}) ([][]byte, error) {
-	out := make([][]byte, 0, len(ids))
-	for _, id := range ids {
-		data, err := binHashKey(id)
-		if err != nil {
-			return nil, fmt.Errorf("BinaryMd5.Map :%v", err)
-		}
-		out = append(out, data)
+func (vind *BinaryMD5) Verify(_ VCursor, ids []sqltypes.Value, ksids [][]byte) ([]bool, error) {
+	out := make([]bool, len(ids))
+	for i := range ids {
+		out[i] = (bytes.Compare(binHash(ids[i].ToBytes()), ksids[i]) == 0)
 	}
 	return out, nil
 }
 
-func binHashKey(key interface{}) ([]byte, error) {
-	source, err := getBytes(key)
-	if err != nil {
-		return nil, err
+// Map returns the corresponding keyspace id values for the given ids.
+func (vind *BinaryMD5) Map(_ VCursor, ids []sqltypes.Value) ([][]byte, error) {
+	out := make([][]byte, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, binHash(id.ToBytes()))
 	}
-	return binHash(source), nil
+	return out, nil
 }
 
 func binHash(source []byte) []byte {

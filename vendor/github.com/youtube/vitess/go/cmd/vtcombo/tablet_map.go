@@ -1,3 +1,19 @@
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreedto in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 import (
@@ -13,6 +29,7 @@ import (
 
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/vt/dbconfigs"
+	"github.com/youtube/vitess/go/vt/grpcclient"
 	"github.com/youtube/vitess/go/vt/hook"
 	"github.com/youtube/vitess/go/vt/key"
 	"github.com/youtube/vitess/go/vt/logutil"
@@ -27,7 +44,6 @@ import (
 	"github.com/youtube/vitess/go/vt/vttablet/tabletconn"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletmanager"
 	"github.com/youtube/vitess/go/vt/vttablet/tabletserver"
-	"github.com/youtube/vitess/go/vt/vttablet/tabletserver/querytypes"
 	"github.com/youtube/vitess/go/vt/vttablet/tmclient"
 	"github.com/youtube/vitess/go/vt/wrangler"
 
@@ -57,7 +73,7 @@ var tabletMap map[uint32]*tablet
 
 // createTablet creates an individual tablet, with its agent, and adds
 // it to the map. If it's a master tablet, it also issues a TER.
-func createTablet(ctx context.Context, ts topo.Server, cell string, uid uint32, keyspace, shard, dbname string, tabletType topodatapb.TabletType, mysqld mysqlctl.MysqlDaemon, dbcfgs dbconfigs.DBConfigs) error {
+func createTablet(ctx context.Context, ts *topo.Server, cell string, uid uint32, keyspace, shard, dbname string, tabletType topodatapb.TabletType, mysqld mysqlctl.MysqlDaemon, dbcfgs dbconfigs.DBConfigs) error {
 	alias := &topodatapb.TabletAlias{
 		Cell: cell,
 		Uid:  uid,
@@ -65,7 +81,7 @@ func createTablet(ctx context.Context, ts topo.Server, cell string, uid uint32, 
 	log.Infof("Creating %v tablet %v for %v/%v", tabletType, topoproto.TabletAliasString(alias), keyspace, shard)
 	flag.Set("debug-url-prefix", fmt.Sprintf("/debug-%d", uid))
 
-	controller := tabletserver.NewServer(ts)
+	controller := tabletserver.NewServer(ts, *alias)
 	initTabletType := tabletType
 	if tabletType == topodatapb.TabletType_MASTER {
 		initTabletType = topodatapb.TabletType_REPLICA
@@ -90,7 +106,7 @@ func createTablet(ctx context.Context, ts topo.Server, cell string, uid uint32, 
 
 // initTabletMap creates the action agents and associated data structures
 // for all tablets, based on the vttest proto parameter.
-func initTabletMap(ts topo.Server, tpb *vttestpb.VTTestTopology, mysqld mysqlctl.MysqlDaemon, dbcfgs dbconfigs.DBConfigs, schemaDir string, mycnf *mysqlctl.Mycnf) error {
+func initTabletMap(ts *topo.Server, tpb *vttestpb.VTTestTopology, mysqld mysqlctl.MysqlDaemon, dbcfgs dbconfigs.DBConfigs, schemaDir string, mycnf *mysqlctl.Mycnf) error {
 	tabletMap = make(map[uint32]*tablet)
 
 	ctx := context.Background()
@@ -250,7 +266,7 @@ func initTabletMap(ts topo.Server, tpb *vttestpb.VTTestTopology, mysqld mysqlctl
 //
 
 // dialer is our tabletconn.Dialer
-func dialer(tablet *topodatapb.Tablet, timeout time.Duration) (queryservice.QueryService, error) {
+func dialer(tablet *topodatapb.Tablet, failFast grpcclient.FailFast) (queryservice.QueryService, error) {
 	t, ok := tabletMap[tablet.Alias.Uid]
 	if !ok {
 		return nil, vterrors.New(vtrpcpb.Code_UNAVAILABLE, "connection refused")
@@ -271,15 +287,8 @@ type internalTabletConn struct {
 
 // Execute is part of queryservice.QueryService
 // We need to copy the bind variables as tablet server will change them.
-func (itc *internalTabletConn) Execute(ctx context.Context, target *querypb.Target, query string, bindVars map[string]interface{}, transactionID int64, options *querypb.ExecuteOptions) (*sqltypes.Result, error) {
-	bv, err := querytypes.BindVariablesToProto3(bindVars)
-	if err != nil {
-		return nil, err
-	}
-	bindVars, err = querytypes.Proto3ToBindVariables(bv)
-	if err != nil {
-		return nil, err
-	}
+func (itc *internalTabletConn) Execute(ctx context.Context, target *querypb.Target, query string, bindVars map[string]*querypb.BindVariable, transactionID int64, options *querypb.ExecuteOptions) (*sqltypes.Result, error) {
+	bindVars = sqltypes.CopyBindVariables(bindVars)
 	reply, err := itc.tablet.qsc.QueryService().Execute(ctx, target, query, bindVars, transactionID, options)
 	if err != nil {
 		return nil, tabletconn.ErrorFromGRPC(vterrors.ToGRPC(err))
@@ -289,19 +298,13 @@ func (itc *internalTabletConn) Execute(ctx context.Context, target *querypb.Targ
 
 // ExecuteBatch is part of queryservice.QueryService
 // We need to copy the bind variables as tablet server will change them.
-func (itc *internalTabletConn) ExecuteBatch(ctx context.Context, target *querypb.Target, queries []querytypes.BoundQuery, asTransaction bool, transactionID int64, options *querypb.ExecuteOptions) ([]sqltypes.Result, error) {
-	q := make([]querytypes.BoundQuery, len(queries))
+func (itc *internalTabletConn) ExecuteBatch(ctx context.Context, target *querypb.Target, queries []*querypb.BoundQuery, asTransaction bool, transactionID int64, options *querypb.ExecuteOptions) ([]sqltypes.Result, error) {
+	q := make([]*querypb.BoundQuery, len(queries))
 	for i, query := range queries {
-		bv, err := querytypes.BindVariablesToProto3(query.BindVariables)
-		if err != nil {
-			return nil, err
+		q[i] = &querypb.BoundQuery{
+			Sql:           query.Sql,
+			BindVariables: sqltypes.CopyBindVariables(query.BindVariables),
 		}
-		bindVars, err := querytypes.Proto3ToBindVariables(bv)
-		if err != nil {
-			return nil, err
-		}
-		q[i].Sql = query.Sql
-		q[i].BindVariables = bindVars
 	}
 	results, err := itc.tablet.qsc.QueryService().ExecuteBatch(ctx, target, q, asTransaction, transactionID, options)
 	if err != nil {
@@ -312,23 +315,15 @@ func (itc *internalTabletConn) ExecuteBatch(ctx context.Context, target *querypb
 
 // StreamExecute is part of queryservice.QueryService
 // We need to copy the bind variables as tablet server will change them.
-func (itc *internalTabletConn) StreamExecute(ctx context.Context, target *querypb.Target, query string, bindVars map[string]interface{}, options *querypb.ExecuteOptions, callback func(*sqltypes.Result) error) error {
-	bv, err := querytypes.BindVariablesToProto3(bindVars)
-	if err != nil {
-		return err
-	}
-	bindVars, err = querytypes.Proto3ToBindVariables(bv)
-	if err != nil {
-		return err
-	}
-
-	err = itc.tablet.qsc.QueryService().StreamExecute(ctx, target, query, bindVars, options, callback)
+func (itc *internalTabletConn) StreamExecute(ctx context.Context, target *querypb.Target, query string, bindVars map[string]*querypb.BindVariable, options *querypb.ExecuteOptions, callback func(*sqltypes.Result) error) error {
+	bindVars = sqltypes.CopyBindVariables(bindVars)
+	err := itc.tablet.qsc.QueryService().StreamExecute(ctx, target, query, bindVars, options, callback)
 	return tabletconn.ErrorFromGRPC(vterrors.ToGRPC(err))
 }
 
 // Begin is part of queryservice.QueryService
-func (itc *internalTabletConn) Begin(ctx context.Context, target *querypb.Target) (int64, error) {
-	transactionID, err := itc.tablet.qsc.QueryService().Begin(ctx, target)
+func (itc *internalTabletConn) Begin(ctx context.Context, target *querypb.Target, options *querypb.ExecuteOptions) (int64, error) {
+	transactionID, err := itc.tablet.qsc.QueryService().Begin(ctx, target, options)
 	if err != nil {
 		return 0, tabletconn.ErrorFromGRPC(vterrors.ToGRPC(err))
 	}
@@ -396,8 +391,8 @@ func (itc *internalTabletConn) ReadTransaction(ctx context.Context, target *quer
 }
 
 // BeginExecute is part of queryservice.QueryService
-func (itc *internalTabletConn) BeginExecute(ctx context.Context, target *querypb.Target, query string, bindVars map[string]interface{}, options *querypb.ExecuteOptions) (*sqltypes.Result, int64, error) {
-	transactionID, err := itc.Begin(ctx, target)
+func (itc *internalTabletConn) BeginExecute(ctx context.Context, target *querypb.Target, query string, bindVars map[string]*querypb.BindVariable, options *querypb.ExecuteOptions) (*sqltypes.Result, int64, error) {
+	transactionID, err := itc.Begin(ctx, target, options)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -406,8 +401,8 @@ func (itc *internalTabletConn) BeginExecute(ctx context.Context, target *querypb
 }
 
 // BeginExecuteBatch is part of queryservice.QueryService
-func (itc *internalTabletConn) BeginExecuteBatch(ctx context.Context, target *querypb.Target, queries []querytypes.BoundQuery, asTransaction bool, options *querypb.ExecuteOptions) ([]sqltypes.Result, int64, error) {
-	transactionID, err := itc.Begin(ctx, target)
+func (itc *internalTabletConn) BeginExecuteBatch(ctx context.Context, target *querypb.Target, queries []*querypb.BoundQuery, asTransaction bool, options *querypb.ExecuteOptions) ([]sqltypes.Result, int64, error) {
+	transactionID, err := itc.Begin(ctx, target, options)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -445,11 +440,11 @@ func (itc *internalTabletConn) Tablet() *topodatapb.Tablet {
 func (itc *internalTabletConn) SplitQuery(
 	ctx context.Context,
 	target *querypb.Target,
-	query querytypes.BoundQuery,
+	query *querypb.BoundQuery,
 	splitColumns []string,
 	splitCount int64,
 	numRowsPerQueryPart int64,
-	algorithm querypb.SplitQueryRequest_Algorithm) ([]querytypes.QuerySplit, error) {
+	algorithm querypb.SplitQueryRequest_Algorithm) ([]*querypb.QuerySplit, error) {
 
 	splits, err := itc.tablet.qsc.QueryService().SplitQuery(
 		ctx,

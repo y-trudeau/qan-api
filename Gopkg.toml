@@ -23,3 +23,7 @@ required = ["github.com/revel/cmd/revel"]
 [[constraint]]
   name = "github.com/revel/revel"
   version = "v0.14.0"
+
+[[constraint]]
+  name = "github.com/youtube/vitess"
+  branch = "master"

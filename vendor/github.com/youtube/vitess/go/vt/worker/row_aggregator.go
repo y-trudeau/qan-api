@@ -1,6 +1,18 @@
-// Copyright 2016, Google Inc. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package worker
 
@@ -11,6 +23,7 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/youtube/vitess/go/sqlescape"
 	"github.com/youtube/vitess/go/sqltypes"
 	"github.com/youtube/vitess/go/stats"
 
@@ -174,7 +187,7 @@ func NewInsertsQueryBuilder(dbName string, td *tabletmanagerdatapb.TableDefiniti
 	// Example: INSERT INTO test (id, sub_id, msg) VALUES (0, 10, 'a'), (1, 11, 'b')
 	return &InsertsQueryBuilder{
 		BaseQueryBuilder{
-			head:      "INSERT INTO " + escape(dbName) + "." + escape(td.Name) + " (" + strings.Join(escapeAll(td.Columns), ", ") + ") VALUES ",
+			head:      "INSERT INTO " + sqlescape.EscapeID(dbName) + "." + sqlescape.EscapeID(td.Name) + " (" + strings.Join(escapeAll(td.Columns), ", ") + ") VALUES ",
 			separator: ",",
 		},
 	}
@@ -214,7 +227,7 @@ func NewUpdatesQueryBuilder(dbName string, td *tabletmanagerdatapb.TableDefiniti
 	// and not the primary key).
 	return &UpdatesQueryBuilder{
 		BaseQueryBuilder: BaseQueryBuilder{
-			head: "UPDATE " + escape(dbName) + "." + escape(td.Name) + " SET ",
+			head: "UPDATE " + sqlescape.EscapeID(dbName) + "." + sqlescape.EscapeID(td.Name) + " SET ",
 		},
 		td: td,
 		// Build list of non-primary key columns (required for update statements).
@@ -236,7 +249,7 @@ func (b *UpdatesQueryBuilder) WriteRow(buffer *bytes.Buffer, row []sqltypes.Valu
 		if i > 0 {
 			buffer.WriteByte(',')
 		}
-		writeEscaped(buffer, column)
+		sqlescape.WriteEscapeID(buffer, column)
 		buffer.WriteByte('=')
 		row[nonPrimaryOffset+i].EncodeSQL(buffer)
 	}
@@ -245,7 +258,7 @@ func (b *UpdatesQueryBuilder) WriteRow(buffer *bytes.Buffer, row []sqltypes.Valu
 		if i > 0 {
 			buffer.WriteString(" AND ")
 		}
-		writeEscaped(buffer, pkColumn)
+		sqlescape.WriteEscapeID(buffer, pkColumn)
 		buffer.WriteByte('=')
 		row[i].EncodeSQL(buffer)
 	}
@@ -266,7 +279,7 @@ func NewDeletesQueryBuilder(dbName string, td *tabletmanagerdatapb.TableDefiniti
 	// for such a query. (We haven't confirmed this ourselves.)
 	return &DeletesQueryBuilder{
 		BaseQueryBuilder: BaseQueryBuilder{
-			head:      "DELETE FROM " + escape(dbName) + "." + escape(td.Name) + " WHERE ",
+			head:      "DELETE FROM " + sqlescape.EscapeID(dbName) + "." + sqlescape.EscapeID(td.Name) + " WHERE ",
 			separator: " OR ",
 		},
 		td: td,
@@ -281,7 +294,7 @@ func (b *DeletesQueryBuilder) WriteRow(buffer *bytes.Buffer, row []sqltypes.Valu
 		if i > 0 {
 			buffer.WriteString(" AND ")
 		}
-		writeEscaped(buffer, pkColumn)
+		sqlescape.WriteEscapeID(buffer, pkColumn)
 		buffer.WriteByte('=')
 		row[i].EncodeSQL(buffer)
 	}

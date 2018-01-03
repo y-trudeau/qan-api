@@ -162,35 +162,26 @@
   version = "v1.2.0"
 
 [[projects]]
+  branch = "master"
   name = "github.com/youtube/vitess"
   packages = [
-    "go/event",
+    "go/bytes2",
     "go/hack",
     "go/sqltypes",
-    "go/tb",
-    "go/vt/logutil",
-    "go/vt/proto/logutil",
     "go/vt/proto/query",
     "go/vt/proto/topodata",
+    "go/vt/proto/vtgate",
     "go/vt/proto/vtrpc",
     "go/vt/sqlparser",
-    "go/vt/utils",
     "go/vt/vterrors"
   ]
-  revision = "89cc312b4da3004d3b5382cf2b37d70e901b1c36"
-  version = "v2.1.1"
+  revision = "3c55c933ee6f7552bd879289e5bf979d15e7fbf4"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/net"
   packages = [
     "context",
-    "http2",
-    "http2/hpack",
-    "idna",
-    "internal/timeseries",
-    "lex/httplex",
-    "trace",
     "websocket"
   ]
   revision = "d866cfc389cec985d6fda2859936a575a55a3ab6"
@@ -203,27 +194,6 @@
 
 [[projects]]
   branch = "master"
-  name = "golang.org/x/text"
-  packages = [
-    "collate",
-    "collate/build",
-    "internal/colltab",
-    "internal/gen",
-    "internal/tag",
-    "internal/triegen",
-    "internal/ucd",
-    "language",
-    "secure/bidirule",
-    "transform",
-    "unicode/bidi",
-    "unicode/cldr",
-    "unicode/norm",
-    "unicode/rangetable"
-  ]
-  revision = "e19ae1496984b1c655b8044a65c0300a3c878dd3"
-
-[[projects]]
-  branch = "master"
   name = "google.golang.org/genproto"
   packages = ["googleapis/rpc/status"]
   revision = "a8101f21cf983e773d0c1133ebc5424792003214"
@@ -231,28 +201,8 @@
 [[projects]]
   name = "google.golang.org/grpc"
   packages = [
-    ".",
-    "balancer",
-    "balancer/base",
-    "balancer/roundrobin",
     "codes",
-    "connectivity",
-    "credentials",
-    "encoding",
-    "grpclb/grpc_lb_v1/messages",
-    "grpclog",
-    "internal",
-    "keepalive",
-    "metadata",
-    "naming",
-    "peer",
-    "resolver",
-    "resolver/dns",
-    "resolver/passthrough",
-    "stats",
-    "status",
-    "tap",
-    "transport"
+    "status"
   ]
   revision = "f3955b8e9e244dd4dd4bc4f7b7a23a8445400a76"
   version = "v1.9.0"
@@ -272,6 +222,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "3f74fa77c0e90c50ff4d8c4a441d2d036be6944a135ceaeca20bd4737484e576"
+  inputs-digest = "160ba80f9ba644293881c28eb655416015425aca2be445bda13cd67236ee8243"
   solver-name = "gps-cdcl"
   solver-version = 1

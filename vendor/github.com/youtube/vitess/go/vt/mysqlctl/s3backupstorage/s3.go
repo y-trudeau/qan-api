@@ -1,3 +1,19 @@
+/*
+Copyright 2017 Google Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreedto in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 // Package s3backupstorage implements the BackupStorage interface for AWS S3.
 //
 // AWS access credentials are configured via standard AWS means, such as:
@@ -34,6 +50,9 @@ var (
 
 	// root is a prefix added to all object names.
 	root = flag.String("s3_backup_storage_root", "", "root prefix for all backup-related object names")
+
+	// sse is the server-side encryption algorithm used when storing this object in S3
+	sse = flag.String("s3_backup_server_side_encryption", "", "server-side encryption algorithm (e.g., AES256, aws:kms)")
 
 	// path component delimiter
 	delimiter = "/"
@@ -73,10 +92,16 @@ func (bh *S3BackupHandle) AddFile(ctx context.Context, filename string) (io.Writ
 		defer bh.waitGroup.Done()
 		uploader := s3manager.NewUploaderWithClient(bh.client)
 		object := objName(bh.dir, bh.name, filename)
+
+		var sseOption *string
+		if *sse != "" {
+			sseOption = sse
+		}
 		_, err := uploader.Upload(&s3manager.UploadInput{
-			Bucket: bucket,
-			Key:    object,
-			Body:   reader,
+			Bucket:               bucket,
+			Key:                  object,
+			Body:                 reader,
+			ServerSideEncryption: sseOption,
 		})
 		if err != nil {
 			reader.CloseWithError(err)
@@ -201,7 +226,7 @@ func (bs *S3BackupStorage) RemoveBackup(ctx context.Context, dir, name string) e
 
 	query := &s3.ListObjectsV2Input{
 		Bucket: bucket,
-		Prefix: objName(dir, ""),
+		Prefix: objName(dir, name),
 	}
 
 	for {
