@@ -3,6 +3,12 @@
 
 required = ["github.com/revel/cmd/revel"]
 
+# Override version for transitive dependency revel/modules
+# otherwise we fetch the latest.
+[[override]]
+  name = "github.com/revel/modules"
+  version = "v0.13.0"
+
 [[constraint]]
   name = "github.com/cactus/go-statsd-client"
 
@@ -30,6 +36,7 @@ required = ["github.com/revel/cmd/revel"]
 
 [[constraint]]
   name = "github.com/revel/revel"
+  version = "v0.13.1"
 
 [[constraint]]
   name = "github.com/robfig/config"
@@ -48,4 +55,4 @@ required = ["github.com/revel/cmd/revel"]
 
 [[constraint]]
   name = "github.com/revel/cmd"
-  revision = "62fc677f3a4043183ad83ccb9cc32165e91dc72e"
+  version = "v0.13.1"

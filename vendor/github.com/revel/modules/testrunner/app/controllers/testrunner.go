@@ -1,7 +1,3 @@
-// Copyright (c) 2012-2016 The Revel Framework Authors, All rights reserved.
-// Revel Framework source code and usage is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package controllers
 
 import (
@@ -72,7 +68,7 @@ var (
 
 // Index is an action which renders the full list of available test suites and their tests.
 func (c TestRunner) Index() revel.Result {
-	c.ViewArgs["suiteFound"] = len(testSuites) > 0
+	c.RenderArgs["suiteFound"] = len(testSuites) > 0
 	return c.Render(testSuites)
 }
 
@@ -85,9 +81,9 @@ func (c TestRunner) Suite(suite string) revel.Result {
 		}
 	}
 
-	c.ViewArgs["testSuites"] = foundTestSuites
-	c.ViewArgs["suiteFound"] = len(foundTestSuites) > 0
-	c.ViewArgs["suiteName"] = suite
+	c.RenderArgs["testSuites"] = foundTestSuites
+	c.RenderArgs["suiteFound"] = len(foundTestSuites) > 0
+	c.RenderArgs["suiteName"] = suite
 
 	return c.RenderTemplate("TestRunner/Index.html")
 }
@@ -121,8 +117,8 @@ func (c TestRunner) Run(suite, test string) revel.Result {
 
 				// Render the error and save to the result structure.
 				var buffer bytes.Buffer
-				tmpl, _ := revel.MainTemplateLoader.TemplateLang("TestRunner/FailureDetail.html", "")
-				_ = tmpl.Render(&buffer, map[string]interface{}{
+				tmpl, _ := revel.MainTemplateLoader.Template("TestRunner/FailureDetail.html")
+				tmpl.Render(&buffer, map[string]interface{}{
 					"error":    panicErr,
 					"response": res,
 					"postfix":  suite + "_" + test,
@@ -153,13 +149,13 @@ func (c TestRunner) Run(suite, test string) revel.Result {
 		result.Passed = true
 	}()
 
-	return c.RenderJSON(result)
+	return c.RenderJson(result)
 }
 
 // List returns a JSON list of test suites and tests.
 // It is used by revel test command line tool.
 func (c TestRunner) List() revel.Result {
-	return c.RenderJSON(testSuites)
+	return c.RenderJson(testSuites)
 }
 
 /*
@@ -213,21 +209,21 @@ func describeSuite(testSuite interface{}) TestSuiteDesc {
 
 // errorSummary gets an error and returns its summary in human readable format.
 func errorSummary(err *revel.Error) (message string) {
-	expectedPrefix := "(expected)"
-	actualPrefix := "(actual)"
+	expected_prefix := "(expected)"
+	actual_prefix := "(actual)"
 	errDesc := err.Description
 	//strip the actual/expected stuff to provide more condensed display.
-	if strings.Index(errDesc, expectedPrefix) == 0 {
-		errDesc = errDesc[len(expectedPrefix):]
+	if strings.Index(errDesc, expected_prefix) == 0 {
+		errDesc = errDesc[len(expected_prefix):len(errDesc)]
 	}
-	if strings.LastIndex(errDesc, actualPrefix) > 0 {
-		errDesc = errDesc[0 : len(errDesc)-len(actualPrefix)]
+	if strings.LastIndex(errDesc, actual_prefix) > 0 {
+		errDesc = errDesc[0 : len(errDesc)-len(actual_prefix)]
 	}
 
 	errFile := err.Path
 	slashIdx := strings.LastIndex(errFile, "/")
 	if slashIdx > 0 {
-		errFile = errFile[slashIdx+1:]
+		errFile = errFile[slashIdx+1 : len(errFile)]
 	}
 
 	message = fmt.Sprintf("%s %s#%d", errDesc, errFile, err.Line)

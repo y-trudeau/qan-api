@@ -17,12 +17,12 @@ type Job struct {
 	running sync.Mutex
 }
 
-const UnNamed = "(unnamed)"
+const UNNAMED = "(unnamed)"
 
 func New(job cron.Job) *Job {
 	name := reflect.TypeOf(job).Name()
 	if name == "Func" {
-		name = UnNamed
+		name = UNNAMED
 	}
 	return &Job{
 		Name:  name,
@@ -43,9 +43,9 @@ func (j *Job) Run() {
 	defer func() {
 		if err := recover(); err != nil {
 			if revelError := revel.NewErrorFromPanic(err); revelError != nil {
-				jobLog.Error("Job Recovery ", "error", err, "stack", revelError.Stack)
+				revel.ERROR.Print(err, "\n", revelError.Stack)
 			} else {
-				jobLog.Error("Job Recovery ", "error", err, "stack", string(debug.Stack()))
+				revel.ERROR.Print(err, "\n", string(debug.Stack()))
 			}
 		}
 	}()
