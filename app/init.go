@@ -294,5 +294,5 @@ func internalError(c *revel.Controller, op string, err error) revel.Result {
 		Error: errMsg,
 	}
 	c.Response.Status = http.StatusInternalServerError
-	return c.RenderJson(res)
+	return c.RenderJSON(res)
 }

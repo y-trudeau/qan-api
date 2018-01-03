@@ -114,20 +114,20 @@
     "harness",
     "revel"
   ]
-  revision = "4b9e74e1eaf41d1041de57ce613aa03aa17232e2"
-  version = "v0.13.1"
+  revision = "95d6366c0d8d727ca62767848fb0801268b49ea6"
+  version = "v0.14.1"
 
 [[projects]]
   name = "github.com/revel/config"
   packages = ["."]
-  revision = "75f5ee659b5338d1ce823536fe9b9e50b4de01b4"
-  version = "v0.13.0"
+  revision = "662332b741dd464a886ab0901379c02b9bc5dc30"
+  version = "v0.18.0"
 
 [[projects]]
   name = "github.com/revel/modules"
   packages = ["testrunner/app/controllers"]
-  revision = "53ac311713e228b1f91a1a6d34445446a67951b3"
-  version = "v0.13.0"
+  revision = "209cc8b2b7ed93a55067bc0db97707b1432e49c4"
+  version = "v0.15.0"
 
 [[projects]]
   name = "github.com/revel/revel"
@@ -135,14 +135,8 @@
     ".",
     "testing"
   ]
-  revision = "8d01a054f6bca9430b3e497fe7b4f20ec8f054ce"
-  version = "v0.13.1"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/robfig/config"
-  packages = ["."]
-  revision = "0f78529c8c7e3e9a25f15876532ecbc07c7d99e6"
+  revision = "75d66c3c990f01deb5ff2045c04da7eea5be39b2"
+  version = "v0.14.0"
 
 [[projects]]
   branch = "master"
@@ -215,6 +209,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "18e626ad7d5ab3652c540442e334e18218fccc439676bccee7c2486708a8003f"
+  inputs-digest = "bddf00705efedb832a0669096bdaefab027e81e51a948707f2ee5986f1fa3e61"
   solver-name = "gps-cdcl"
   solver-version = 1
