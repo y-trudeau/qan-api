@@ -1,7 +1,11 @@
 # Refer to https://github.com/golang/dep/blob/master/docs/Gopkg.toml.md
 # for detailed Gopkg.toml documentation.
 
+# Require `revel` command (compiled later from vendor dir)
 required = ["github.com/revel/cmd/revel"]
+[[constraint]]
+  name = "github.com/revel/cmd"
+  version = "v0.14.1"
 
 # Override version for transitive dependencies
 # otherwise we fetch the latest.
@@ -13,49 +17,9 @@ required = ["github.com/revel/cmd/revel"]
   version = "v0.14.0"
 
 [[constraint]]
-  name = "github.com/cactus/go-statsd-client"
-
-[[constraint]]
-  name = "github.com/go-sql-driver/mysql"
-
-[[constraint]]
-  name = "github.com/hashicorp/go-version"
-
-[[constraint]]
-  name = "github.com/jmoiron/sqlx"
-
-[[constraint]]
-  name = "github.com/nu7hatch/gouuid"
-
-[[constraint]]
-  name = "github.com/percona/go-mysql"
-
-[[constraint]]
-  name = "github.com/percona/pmm"
-
-[[constraint]]
   name = "github.com/pkg/errors"
   version = "0.8.0"
 
 [[constraint]]
   name = "github.com/revel/revel"
   version = "v0.14.0"
-
-[[constraint]]
-  name = "github.com/robfig/config"
-
-[[constraint]]
-  name = "github.com/stretchr/testify"
-
-[[constraint]]
-  name = "github.com/youtube/vitess"
-
-[[constraint]]
-  name = "golang.org/x/net"
-
-[[constraint]]
-  name = "gopkg.in/check.v1"
-
-[[constraint]]
-  name = "github.com/revel/cmd"
-  version = "v0.14.1"
